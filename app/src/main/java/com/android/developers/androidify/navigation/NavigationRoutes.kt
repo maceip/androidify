@@ -26,6 +26,10 @@ sealed interface NavigationRoute
 @Serializable
 data object Home : NavigationRoute
 
+/** Root launcher home screen — the first destination when the app acts as a home screen. */
+@Serializable
+data object Launcher : NavigationRoute
+
 @Serializable
 data class Create(
     @Serializable(with = UriSerializer::class) val fileName: Uri? = null,

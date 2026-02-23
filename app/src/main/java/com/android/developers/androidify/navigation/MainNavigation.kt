@@ -45,15 +45,18 @@ import com.android.developers.androidify.customize.CustomizeAndExportScreen
 import com.android.developers.androidify.customize.CustomizeExportViewModel
 import com.android.developers.androidify.home.AboutScreen
 import com.android.developers.androidify.home.HomeScreen
+import com.android.developers.androidify.launcher.data.LauncherLayoutType
+import com.android.developers.androidify.launcher.ui.LauncherHomeScreen
 import com.android.developers.androidify.results.ResultsScreen
 import com.android.developers.androidify.results.ResultsViewModel
 import com.android.developers.androidify.theme.transitions.ColorSplashTransitionScreen
+import com.android.developers.androidify.util.isWidthAtLeastMedium
 import com.google.android.gms.oss.licenses.OssLicensesMenuActivity
 
 @ExperimentalMaterial3ExpressiveApi
 @Composable
 fun MainNavigation() {
-    val backStack = rememberMutableStateListOf<NavigationRoute>(Home)
+    val backStack = rememberMutableStateListOf<NavigationRoute>(Launcher)
     var positionReveal by remember {
         mutableStateOf(IntOffset.Zero)
     }
@@ -83,6 +86,18 @@ fun MainNavigation() {
             )
         },
         entryProvider = entryProvider {
+            entry<Launcher> {
+                // Determine if the device is showing a foldable inner (wide) display
+                val isFoldable = isWidthAtLeastMedium()
+                val launcherLayoutType = if (isFoldable) {
+                    LauncherLayoutType.Foldable
+                } else {
+                    LauncherLayoutType.Phone
+                }
+                LauncherHomeScreen(
+                    layoutType = launcherLayoutType,
+                )
+            }
             entry<Home> { entry ->
                 HomeScreen(
                     onClickLetsGo = { positionOffset ->
