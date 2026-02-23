@@ -44,10 +44,8 @@ import javax.inject.Inject
 data class LauncherUiState(
     val allApps: List<AppInfo> = emptyList(),
     val filteredApps: List<AppInfo> = emptyList(),
-    /** Up to 3 pinned dock apps sourced from common installed packages. */
+    /** Up to 5 pinned dock/hotseat apps sourced from common installed packages. */
     val dockApps: List<AppInfo> = emptyList(),
-    /** AI-suggested app for the fourth dock slot — null shows the mystery placeholder. */
-    val suggestedApp: AppInfo? = null,
     val recentTasks: List<RecentTask> = emptyList(),
     val recentFiles: List<RecentFile> = emptyList(),
     val chromeTabs: List<ChromeTab> = emptyList(),
@@ -124,23 +122,16 @@ class LauncherViewModel @Inject constructor(
                 .sortedBy { it.label.lowercase() }
                 .distinctBy { it.packageName }
 
-            // Pick up to 3 dock apps from the preferred package list, in order
+            // Pick up to 5 dock apps from the preferred package list, in order
             val dockApps = DOCK_PACKAGE_PRIORITY
                 .mapNotNull { pkg -> apps.find { it.packageName == pkg } }
-                .take(3)
-
-            // Suggested app: first installed app from the "contextual pick" list
-            // that isn't already in the dock
-            val suggestedApp = SUGGESTED_PACKAGE_PRIORITY
-                .mapNotNull { pkg -> apps.find { it.packageName == pkg } }
-                .firstOrNull { it !in dockApps }
+                .take(5)
 
             _uiState.update { state ->
                 state.copy(
                     allApps = apps,
                     filteredApps = if (state.searchQuery.isBlank()) apps else state.filteredApps,
                     dockApps = dockApps,
-                    suggestedApp = suggestedApp,
                     isLoading = false,
                 )
             }
@@ -322,24 +313,22 @@ class LauncherViewModel @Inject constructor(
         const val MAX_RECENT_TASKS = 10
         const val MAX_RECENT_FILES = 6
 
-        /** Preferred packages for the 3 pinned dock slots, tried in order. */
+        /**
+         * Preferred packages for the 5 dock / hotseat slots, tried in order.
+         * Matches the stock Pixel Launcher default: Phone, Messages, Chrome,
+         * Camera, Maps — with fallbacks to other common Google apps.
+         */
         val DOCK_PACKAGE_PRIORITY = listOf(
-            "com.android.chrome",
-            "com.google.android.googlequicksearchbox",
             "com.google.android.dialer",
             "com.google.android.apps.messaging",
+            "com.android.chrome",
+            "com.google.android.GoogleCamera",
+            "com.google.android.apps.maps",
+            "com.google.android.googlequicksearchbox",
             "com.google.android.gm",
             "com.android.vending",
-        )
-
-        /** Packages considered for the AI-suggested fourth dock slot. */
-        val SUGGESTED_PACKAGE_PRIORITY = listOf(
-            "com.google.android.apps.maps",
             "com.google.android.youtube",
             "com.google.android.apps.photos",
-            "com.google.android.apps.docs",
-            "com.spotify.music",
-            "com.instagram.android",
         )
 
         val RECENT_FILE_MIME_TYPES = listOf(

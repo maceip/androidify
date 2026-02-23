@@ -15,18 +15,11 @@
  */
 package com.android.developers.androidify.launcher.ui
 
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,11 +31,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.Cast
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -57,11 +48,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -72,7 +62,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.android.developers.androidify.launcher.data.AppInfo
@@ -84,147 +73,102 @@ private val GoogleYellow = Color(0xFFFBBC05)
 private val GoogleGreen = Color(0xFF34A853)
 
 /**
- * Full Pixel-Launcher-style bottom chrome:
+ * Pixel-Launcher-style bottom chrome consisting of:
  *
- * 1. **AI search bar** — small translucent pill with sparkle icon (top)
- * 2. **Dock row** — 3 pinned apps + 1 AI-suggested slot with a pulsing glow ring
- * 3. **Google search bar** — large white pill with the Google G logo, Gemini sparkle,
- *    mic, and lens icons (bottom)
+ * 1. **Google search bar** — white pill with the Google G logo, Gemini sparkle,
+ *    mic, and lens icons
+ * 2. **Dock hotseat** — 5 pinned app icons with no labels, sitting on a subtle
+ *    translucent background with rounded top corners
+ *
+ * Layout matches the stock Pixel Launcher bottom area as seen on Pixel 9 devices.
  */
 @Composable
 fun PixelBottomBar(
     dockApps: List<AppInfo>,
-    suggestedApp: AppInfo?,
     onAppClick: (AppInfo) -> Unit,
     onSearch: (String) -> Unit,
     onVoiceSearch: () -> Unit,
     onLensSearch: () -> Unit,
-    onWidgetAction: (WidgetContextAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
-        // ── 1. AI / web search bar ──────────────────────────────────────────
-        AiSearchBar(
-            onTap = { onSearch("") },
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        // ── 2. Dock ─────────────────────────────────────────────────────────
-        DockRow(
-            dockApps = dockApps,
-            suggestedApp = suggestedApp,
-            onAppClick = onAppClick,
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        // ── 3. Google search bar ─────────────────────────────────────────────
+        // ── 1. Google search bar ─────────────────────────────────────────
         GoogleSearchBar(
             onSearch = onSearch,
             onVoiceSearch = onVoiceSearch,
             onLensSearch = onLensSearch,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 10.dp),
+        )
+
+        // ── 2. Dock hotseat ─────────────────────────────────────────────
+        DockHotseat(
+            dockApps = dockApps,
+            onAppClick = onAppClick,
             modifier = Modifier.fillMaxWidth(),
         )
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AI search bar
+// Dock hotseat
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Small translucent pill at the top of the bottom bar. Mimics the secondary
- * "web search" bar visible in recent Pixel Launcher builds.
+ * Stock-Android-style dock / hotseat: 5 app icons with no text labels,
+ * sitting on a translucent dark background with rounded top corners.
+ *
+ * The hotseat is always visible on the home screen and sits below the
+ * Google search bar. It gets covered when the app drawer slides up.
  */
 @Composable
-private fun AiSearchBar(
-    onTap: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .height(44.dp)
-            .clip(RoundedCornerShape(50))
-            .background(Color.White.copy(alpha = 0.14f))
-            .clickable(onClick = onTap)
-            .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            imageVector = Icons.Outlined.AutoAwesome,
-            contentDescription = null,
-            tint = Color.White.copy(alpha = 0.9f),
-            modifier = Modifier.size(18.dp),
-        )
-
-        Spacer(Modifier.width(10.dp))
-
-        Text(
-            text = "Ask anything",
-            style = MaterialTheme.typography.bodyMedium,
-            color = Color.White.copy(alpha = 0.75f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-
-        Icon(
-            imageVector = Icons.Outlined.Cast,
-            contentDescription = null,
-            tint = Color.White.copy(alpha = 0.6f),
-            modifier = Modifier.size(18.dp),
-        )
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Dock row
-// ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun DockRow(
+private fun DockHotseat(
     dockApps: List<AppInfo>,
-    suggestedApp: AppInfo?,
     onAppClick: (AppInfo) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // Regular pinned dock apps (up to 3)
-        dockApps.forEach { app ->
-            DockIconItem(
-                app = app,
-                onClick = { onAppClick(app) },
+    Box(
+        modifier = modifier
+            .background(
+                color = Color.Black.copy(alpha = 0.22f),
+                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
             )
+            .padding(horizontal = 12.dp, vertical = 14.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            dockApps.forEach { app ->
+                HotseatIcon(
+                    app = app,
+                    onClick = { onAppClick(app) },
+                )
+            }
+            // Fill remaining empty slots to keep spacing even
+            repeat((DOCK_SLOT_COUNT - dockApps.size).coerceAtLeast(0)) {
+                Spacer(Modifier.size(HOTSEAT_ICON_TOUCH_SIZE))
+            }
         }
-
-        // Fill remaining dock slots so the AI slot always lands in position 4
-        repeat((3 - dockApps.size).coerceAtLeast(0)) {
-            Spacer(Modifier.size(DOCK_ICON_SIZE))
-        }
-
-        // AI-suggested / mystery slot
-        AiPickSlot(
-            app = suggestedApp,
-            onClick = { suggestedApp?.let(onAppClick) },
-        )
     }
 }
 
-private val DOCK_ICON_SIZE = 56.dp
+private const val DOCK_SLOT_COUNT = 5
+private val HOTSEAT_ICON_TOUCH_SIZE = 58.dp
+private val HOTSEAT_ICON_SIZE = 52.dp
 
 /**
- * Dock-sized app icon: just the icon + label, no aspect-ratio inflation.
- * Uses the same spring-press scale as [AppIconItem] for consistency.
+ * Individual dock icon: just the app icon, no label. Uses the same
+ * spring-press scale animation as [AppIconItem] for consistency.
  */
 @Composable
-private fun DockIconItem(
+private fun HotseatIcon(
     app: AppInfo,
     onClick: () -> Unit,
 ) {
@@ -236,12 +180,12 @@ private fun DockIconItem(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessHigh,
         ),
-        label = "dockIconScale",
+        label = "hotseatIconScale",
     )
 
-    Column(
+    Box(
         modifier = Modifier
-            .size(DOCK_ICON_SIZE)
+            .size(HOTSEAT_ICON_TOUCH_SIZE)
             .scale(scale)
             .pointerInput(Unit) {
                 detectTapGestures(
@@ -253,115 +197,20 @@ private fun DockIconItem(
                     },
                     onTap = { onClick() },
                 )
+            }
+            .semantics {
+                contentDescription = app.label
+                role = Role.Button
             },
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+        contentAlignment = Alignment.Center,
     ) {
         AppIconImage(
             drawable = app.icon,
             contentDescription = app.label,
             modifier = Modifier
-                .size(46.dp)
+                .size(HOTSEAT_ICON_SIZE)
                 .clip(RoundedCornerShape(14.dp)),
         )
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text = app.label,
-            style = MaterialTheme.typography.labelSmall,
-            color = Color.White,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-        )
-    }
-}
-
-/**
- * The fourth dock slot. Shows the suggested [app] icon inside a pulsing blue
- * glow ring, or a "?" mystery placeholder when no suggestion is available.
- */
-@Composable
-private fun AiPickSlot(
-    app: AppInfo?,
-    onClick: () -> Unit,
-) {
-    val infiniteTransition = rememberInfiniteTransition(label = "aiPickGlow")
-    val glowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.25f,
-        targetValue = 0.65f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "glowAlpha",
-    )
-    val glowRadius by infiniteTransition.animateFloat(
-        initialValue = 0.55f,
-        targetValue = 0.75f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "glowRadius",
-    )
-    // Pre-compute so drawBehind can read it without shadowing DrawScope.size
-    val slotPx = with(androidx.compose.ui.platform.LocalDensity.current) {
-        DOCK_ICON_SIZE.toPx()
-    }
-
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .size(DOCK_ICON_SIZE)
-            .drawBehind {
-                // Pulsing radial glow ring
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            GoogleBlue.copy(alpha = glowAlpha),
-                            GoogleBlue.copy(alpha = glowAlpha * 0.4f),
-                            Color.Transparent,
-                        ),
-                        radius = slotPx * glowRadius,
-                    ),
-                    radius = slotPx * glowRadius,
-                )
-            }
-            .clip(CircleShape)
-            .clickable(onClick = onClick)
-            .semantics {
-                contentDescription = if (app != null) {
-                    "AI suggested: ${app.label}"
-                } else {
-                    "AI app pick — no suggestion yet"
-                }
-                role = Role.Button
-            },
-    ) {
-        if (app != null) {
-            DockIconItem(app = app, onClick = onClick)
-        } else {
-            // Mystery placeholder: dark circle + "?" emoji
-            Box(
-                modifier = Modifier
-                    .size(DOCK_ICON_SIZE - 8.dp)
-                    .background(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                Color(0xFF1A1A3E),
-                                Color(0xFF0D0D24),
-                            ),
-                        ),
-                        shape = CircleShape,
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = "✨",
-                    style = MaterialTheme.typography.titleLarge,
-                )
-            }
-        }
     }
 }
 
@@ -413,6 +262,7 @@ private fun GoogleSearchBar(
                 style = MaterialTheme.typography.bodyLarge,
                 color = Color(0xFF5F6368), // Google search hint grey
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
 
@@ -442,7 +292,7 @@ private fun GoogleSearchBar(
                 )
             }
 
-            // Lens (camera-style lens icon drawn inline)
+            // Lens
             IconButton(
                 onClick = onLensSearch,
                 modifier = Modifier.size(40.dp),
@@ -553,7 +403,7 @@ private fun LensIcon(
             color = tint,
             topLeft = Offset(padding, padding),
             size = Size(size.width - stroke, size.height - stroke),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerR),
+            cornerRadius = CornerRadius(cornerR),
             style = Stroke(width = stroke),
         )
 

@@ -79,8 +79,8 @@ fun LauncherHomeScreen(
     val drawerState = remember {
         AnchoredDraggableState(
             initialValue = DrawerValue.Collapsed,
-            positionalThreshold = { totalDistance -> totalDistance * 0.4f },
-            velocityThreshold = { with(density) { 100.dp.toPx() } },
+            positionalThreshold = { distance -> distance * 0.5f },
+            velocityThreshold = { with(density) { 125.dp.toPx() } },
             snapAnimationSpec = spring(
                 dampingRatio = Spring.DampingRatioMediumBouncy,
                 stiffness = Spring.StiffnessMedium,
@@ -212,9 +212,8 @@ private fun PhoneLauncherLayout(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
-                .padding(bottom = 12.dp),
+                .padding(bottom = 4.dp),
             dockApps = uiState.dockApps,
-            suggestedApp = uiState.suggestedApp,
             onAppClick = onAppClick,
             onSearch = onSearch,
             onVoiceSearch = onVoiceSearch,
