@@ -132,6 +132,7 @@ dependencies {
     implementation(projects.feature.camera)
     implementation(projects.feature.creation)
     implementation(projects.feature.home)
+    implementation(projects.feature.launcher)
     implementation(projects.feature.results)
 
     implementation(projects.core.theme)
