@@ -15,15 +15,8 @@
  */
 package com.android.developers.androidify.launcher.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.AnchoredDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -67,10 +60,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import com.android.developers.androidify.launcher.LauncherUiState
 import com.android.developers.androidify.launcher.data.AppInfo
@@ -79,10 +78,16 @@ import com.android.developers.androidify.launcher.data.RecentTask
 
 /**
  * Full-screen app drawer that slides up from the bottom when the user swipes up
- * on the home screen. Mirrors the stock Android 15+ app-switcher design:
+ * on the home screen.
+ *
+ * The drawer is always in the composition tree and translated off-screen via
+ * [graphicsLayer] when collapsed, so there is no AnimatedVisibility overhead on
+ * first open. Position tracks the finger 1:1 through [drawerState]; spring physics
+ * snap it to the nearest anchor on release.
  *
  * **Phone layout**: recent-app mini-cards at top, search field, then alphabetical
- * app grid below — all in a single column.
+ * app grid — coordinated via [NestedScrollConnection] so scrolling down at the
+ * list top closes the drawer instead of over-scrolling.
  *
  * **Foldable layout**: running-apps tiled on the left half; search + app list on
  * the right half (see [FoldableAppDrawer]).
@@ -92,7 +97,8 @@ import com.android.developers.androidify.launcher.data.RecentTask
 fun AppDrawer(
     uiState: LauncherUiState,
     layoutType: LauncherLayoutType,
-    visible: Boolean,
+    drawerState: AnchoredDraggableState<DrawerValue>,
+    screenHeightPx: Float,
     onDismiss: () -> Unit,
     onAppClick: (AppInfo) -> Unit,
     onTaskClick: (RecentTask) -> Unit,
@@ -100,53 +106,41 @@ fun AppDrawer(
     onSearchSubmit: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    AnimatedVisibility(
-        visible = visible,
-        enter = slideInVertically(
-            initialOffsetY = { fullHeight -> fullHeight },
-            animationSpec = spring(
-                dampingRatio = Spring.DampingRatioLowBouncy,
-                stiffness = Spring.StiffnessMedium,
-            ),
-        ) + fadeIn(animationSpec = tween(200)),
-        exit = slideOutVertically(
-            targetOffsetY = { fullHeight -> fullHeight },
-            animationSpec = spring(
-                dampingRatio = Spring.DampingRatioNoBouncy,
-                stiffness = Spring.StiffnessMediumLow,
-            ),
-        ) + fadeOut(animationSpec = tween(180)),
-        modifier = modifier,
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Black.copy(alpha = 0.75f),
-                            Color.Black.copy(alpha = 0.92f),
-                        ),
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            // GPU-translate the entire drawer — no recomposition during drag
+            .graphicsLayer {
+                val raw = drawerState.offset
+                translationY = if (raw.isNaN()) screenHeightPx else raw
+            }
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color.Black.copy(alpha = 0.75f),
+                        Color.Black.copy(alpha = 0.92f),
                     ),
                 ),
-        ) {
-            when (layoutType) {
-                LauncherLayoutType.Phone -> PhoneAppDrawer(
-                    uiState = uiState,
-                    onAppClick = onAppClick,
-                    onTaskClick = onTaskClick,
-                    onSearchQueryChange = onSearchQueryChange,
-                    onSearchSubmit = onSearchSubmit,
-                    onDismiss = onDismiss,
-                )
-                LauncherLayoutType.Foldable -> FoldableAppDrawer(
-                    uiState = uiState,
-                    onAppClick = onAppClick,
-                    onTaskClick = onTaskClick,
-                    onSearchQueryChange = onSearchQueryChange,
-                    onSearchSubmit = onSearchSubmit,
-                )
-            }
+            ),
+    ) {
+        when (layoutType) {
+            LauncherLayoutType.Phone -> PhoneAppDrawer(
+                uiState = uiState,
+                drawerState = drawerState,
+                onAppClick = onAppClick,
+                onTaskClick = onTaskClick,
+                onSearchQueryChange = onSearchQueryChange,
+                onSearchSubmit = onSearchSubmit,
+                onDismiss = onDismiss,
+            )
+            LauncherLayoutType.Foldable -> FoldableAppDrawer(
+                uiState = uiState,
+                drawerState = drawerState,
+                onAppClick = onAppClick,
+                onTaskClick = onTaskClick,
+                onSearchQueryChange = onSearchQueryChange,
+                onSearchSubmit = onSearchSubmit,
+            )
         }
     }
 }
@@ -155,6 +149,7 @@ fun AppDrawer(
 @Composable
 private fun PhoneAppDrawer(
     uiState: LauncherUiState,
+    drawerState: AnchoredDraggableState<DrawerValue>,
     onAppClick: (AppInfo) -> Unit,
     onTaskClick: (RecentTask) -> Unit,
     onSearchQueryChange: (String) -> Unit,
@@ -163,8 +158,37 @@ private fun PhoneAppDrawer(
 ) {
     val focusRequester = remember { FocusRequester() }
 
-    LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
+    // Request keyboard focus only once the drawer has fully settled open
+    LaunchedEffect(drawerState.currentValue) {
+        if (drawerState.currentValue == DrawerValue.Expanded) {
+            focusRequester.requestFocus()
+        }
+    }
+
+    // Remaining downward scroll after the list reaches the top closes the drawer
+    val nestedScrollConnection = remember(drawerState) {
+        object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                return if (available.y > 0f) {
+                    Offset(0f, drawerState.dispatchRawDelta(available.y))
+                } else {
+                    Offset.Zero
+                }
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                return if (available.y > 0f && drawerState.currentValue != DrawerValue.Collapsed) {
+                    drawerState.settle(available.y)
+                    available
+                } else {
+                    Velocity.Zero
+                }
+            }
+        }
     }
 
     Column(
@@ -186,7 +210,6 @@ private fun PhoneAppDrawer(
 
         Spacer(Modifier.height(16.dp))
 
-        // Recent apps section header
         if (uiState.recentTasks.isNotEmpty()) {
             Text(
                 text = "Recent apps",
@@ -205,7 +228,6 @@ private fun PhoneAppDrawer(
             Spacer(Modifier.height(16.dp))
         }
 
-        // Search field
         DrawerSearchField(
             query = uiState.searchQuery,
             onQueryChange = onSearchQueryChange,
@@ -218,12 +240,13 @@ private fun PhoneAppDrawer(
 
         Spacer(Modifier.height(12.dp))
 
-        // App grid
+        // nestedScroll coordinates "scroll list" vs "close drawer" seamlessly
         LazyVerticalGrid(
             columns = GridCells.Fixed(4),
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f),
+                .weight(1f)
+                .nestedScroll(nestedScrollConnection),
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -242,6 +265,7 @@ private fun PhoneAppDrawer(
 @Composable
 fun FoldableAppDrawer(
     uiState: LauncherUiState,
+    drawerState: AnchoredDraggableState<DrawerValue>,
     onAppClick: (AppInfo) -> Unit,
     onTaskClick: (RecentTask) -> Unit,
     onSearchQueryChange: (String) -> Unit,
@@ -249,7 +273,37 @@ fun FoldableAppDrawer(
     modifier: Modifier = Modifier,
 ) {
     val focusRequester = remember { FocusRequester() }
-    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    LaunchedEffect(drawerState.currentValue) {
+        if (drawerState.currentValue == DrawerValue.Expanded) {
+            focusRequester.requestFocus()
+        }
+    }
+
+    val nestedScrollConnection = remember(drawerState) {
+        object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                return if (available.y > 0f) {
+                    Offset(0f, drawerState.dispatchRawDelta(available.y))
+                } else {
+                    Offset.Zero
+                }
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                return if (available.y > 0f && drawerState.currentValue != DrawerValue.Collapsed) {
+                    drawerState.settle(available.y)
+                    available
+                } else {
+                    Velocity.Zero
+                }
+            }
+        }
+    }
 
     Row(
         modifier = modifier
@@ -304,7 +358,8 @@ fun FoldableAppDrawer(
                 columns = GridCells.Fixed(3),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
+                    .weight(1f)
+                    .nestedScroll(nestedScrollConnection),
                 contentPadding = PaddingValues(vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),

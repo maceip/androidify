@@ -17,9 +17,14 @@ package com.android.developers.androidify.launcher.ui
 
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.rememberSplineBasedDecay
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.AnchoredDraggableState
+import androidx.compose.foundation.gestures.DraggableAnchors
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.anchoredDraggable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,15 +36,14 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -48,11 +52,17 @@ import com.android.developers.androidify.launcher.LauncherViewModel
 import com.android.developers.androidify.launcher.data.AppInfo
 import com.android.developers.androidify.launcher.data.LauncherLayoutType
 import com.android.developers.androidify.launcher.data.RecentTask
-import com.android.developers.androidify.launcher.data.WidgetContextAction
+import kotlinx.coroutines.launch
+
+/** Two settled positions for the app-drawer sheet. */
+enum class DrawerValue { Collapsed, Expanded }
 
 /**
  * Root composable for the launcher home screen. Chooses between phone and foldable
  * layouts based on [layoutType], and manages the swipe-up app-drawer overlay.
+ *
+ * The drawer is driven by [AnchoredDraggableState] so it follows the finger 1:1
+ * during a drag and snaps to Collapsed/Expanded with spring physics on release.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,37 +72,63 @@ fun LauncherHomeScreen(
     viewModel: LauncherViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var showAppDrawer by remember { mutableStateOf(false) }
+    val density = LocalDensity.current
+    val decaySpec = rememberSplineBasedDecay<Float>()
+    val scope = rememberCoroutineScope()
 
-    // Refresh recent tasks whenever the drawer opens
-    LaunchedEffect(showAppDrawer) {
-        if (showAppDrawer) viewModel.refreshRecentTasks()
+    val drawerState = remember {
+        AnchoredDraggableState(
+            initialValue = DrawerValue.Collapsed,
+            positionalThreshold = { totalDistance -> totalDistance * 0.4f },
+            velocityThreshold = { with(density) { 100.dp.toPx() } },
+            snapAnimationSpec = spring(
+                dampingRatio = Spring.DampingRatioMediumBouncy,
+                stiffness = Spring.StiffnessMedium,
+            ),
+            decayAnimationSpec = decaySpec,
+        )
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    // Refresh recent tasks whenever the drawer settles fully open
+    LaunchedEffect(drawerState.currentValue) {
+        if (drawerState.currentValue == DrawerValue.Expanded) viewModel.refreshRecentTasks()
+    }
+
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val screenHeightPx = with(density) { maxHeight.toPx() }
+
+        // Update anchors every time the resolved screen height changes
+        SideEffect {
+            drawerState.updateAnchors(
+                DraggableAnchors {
+                    DrawerValue.Collapsed at screenHeightPx
+                    DrawerValue.Expanded at 0f
+                },
+            )
+        }
+
         WallpaperBackground()
 
         when (layoutType) {
             LauncherLayoutType.Phone -> PhoneLauncherLayout(
                 uiState = uiState,
-                onSwipeUp = { showAppDrawer = true },
+                drawerState = drawerState,
                 onAppClick = { app ->
                     viewModel.launchApp(app)
-                    showAppDrawer = false
+                    scope.launch { drawerState.animateTo(DrawerValue.Collapsed) }
                 },
                 onSearch = viewModel::launchSearch,
                 onVoiceSearch = viewModel::launchVoiceSearch,
                 onLensSearch = viewModel::launchLensSearch,
-                onWidgetAction = { /* no-op for now */ },
             )
 
             LauncherLayoutType.Foldable -> FoldableLauncherLayout(
                 uiState = uiState,
                 foldingFeature = foldingFeature,
-                onSwipeUp = { showAppDrawer = true },
+                drawerState = drawerState,
                 onAppClick = { app ->
                     viewModel.launchApp(app)
-                    showAppDrawer = false
+                    scope.launch { drawerState.animateTo(DrawerValue.Collapsed) }
                 },
                 onSearch = viewModel::launchSearch,
                 onVoiceSearch = viewModel::launchVoiceSearch,
@@ -101,56 +137,52 @@ fun LauncherHomeScreen(
             )
         }
 
-        // App drawer overlay — slides up from the bottom
+        // App drawer — always in composition, GPU-translated off-screen when collapsed
         AppDrawer(
             uiState = uiState,
             layoutType = layoutType,
-            visible = showAppDrawer,
-            onDismiss = { showAppDrawer = false },
+            drawerState = drawerState,
+            screenHeightPx = screenHeightPx,
+            onDismiss = { scope.launch { drawerState.animateTo(DrawerValue.Collapsed) } },
             onAppClick = { app ->
                 viewModel.launchApp(app)
-                showAppDrawer = false
+                scope.launch { drawerState.animateTo(DrawerValue.Collapsed) }
             },
             onTaskClick = { task ->
                 viewModel.launchApp(
-                    com.android.developers.androidify.launcher.data.AppInfo(
+                    AppInfo(
                         packageName = task.packageName,
                         label = task.label,
                         icon = task.icon,
                         launchIntent = null,
                     ),
                 )
-                showAppDrawer = false
+                scope.launch { drawerState.animateTo(DrawerValue.Collapsed) }
             },
             onSearchQueryChange = viewModel::updateSearchQuery,
             onSearchSubmit = { query ->
                 viewModel.launchSearch(query)
-                showAppDrawer = false
+                scope.launch { drawerState.animateTo(DrawerValue.Collapsed) }
             },
         )
     }
 }
 
 /**
- * Phone home screen: wallpaper + app icon grid + pill search widget at bottom.
- * A swipe-up gesture anywhere triggers the app drawer.
+ * Phone home screen: app icon grid + Pixel-style bottom bar (dock + search widget).
+ * Swipe up anywhere opens the app drawer via [drawerState].
  */
 @Composable
 private fun PhoneLauncherLayout(
     uiState: com.android.developers.androidify.launcher.LauncherUiState,
-    onSwipeUp: () -> Unit,
+    drawerState: AnchoredDraggableState<DrawerValue>,
     onAppClick: (AppInfo) -> Unit,
     onSearch: (String) -> Unit,
     onVoiceSearch: () -> Unit,
     onLensSearch: () -> Unit,
-    onWidgetAction: (WidgetContextAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // Track drag direction to detect a meaningful upward swipe
-    var cumulativeDragY by remember { mutableFloatStateOf(0f) }
-    val swipeThresholdPx = 120f
-
-    // Fade-in animation for app icons after wallpaper loads
+    // Fade-in for app icons after wallpaper loads
     val contentAlpha by animateFloatAsState(
         targetValue = 1f,
         animationSpec = spring(stiffness = Spring.StiffnessLow),
@@ -162,23 +194,11 @@ private fun PhoneLauncherLayout(
             .fillMaxSize()
             .statusBarsPadding()
             .navigationBarsPadding()
-            .pointerInput(Unit) {
-                detectVerticalDragGestures(
-                    onDragStart = { cumulativeDragY = 0f },
-                    onVerticalDrag = { _, dragAmount ->
-                        cumulativeDragY += dragAmount
-                        if (cumulativeDragY < -swipeThresholdPx) {
-                            onSwipeUp()
-                            cumulativeDragY = 0f
-                        }
-                    },
-                    onDragEnd = { cumulativeDragY = 0f },
-                    onDragCancel = { cumulativeDragY = 0f },
-                )
-            }
+            // anchoredDraggable replaces the old detectVerticalDragGestures threshold.
+            // Upward drag opens the drawer; release snaps with spring physics.
+            .anchoredDraggable(drawerState, Orientation.Vertical)
             .alpha(contentAlpha),
     ) {
-        // App icon grid takes the majority of the screen
         AppGrid(
             apps = uiState.allApps,
             columns = 4,
@@ -188,16 +208,17 @@ private fun PhoneLauncherLayout(
             onAppClick = onAppClick,
         )
 
-        // Single pill-shaped search widget pinned at the bottom
-        PillSearchWidget(
+        PixelBottomBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 12.dp),
+            dockApps = uiState.dockApps,
+            suggestedApp = uiState.suggestedApp,
+            onAppClick = onAppClick,
             onSearch = onSearch,
             onVoiceSearch = onVoiceSearch,
             onLensSearch = onLensSearch,
-            onWidgetAction = onWidgetAction,
         )
     }
 }
@@ -205,15 +226,13 @@ private fun PhoneLauncherLayout(
 /**
  * Foldable inner-display home screen.
  *
- * The expanded canvas uses a richer layout:
- * - Larger search widget with recent Chrome tabs and recent files
- * - App grid sized for a wider display
+ * Wider 5-column grid + expanded search widget with Chrome tabs and recent files.
  */
 @Composable
 fun FoldableLauncherLayout(
     uiState: com.android.developers.androidify.launcher.LauncherUiState,
     foldingFeature: FoldingFeature? = null,
-    onSwipeUp: () -> Unit,
+    drawerState: AnchoredDraggableState<DrawerValue>,
     onAppClick: (AppInfo) -> Unit,
     onSearch: (String) -> Unit,
     onVoiceSearch: () -> Unit,
@@ -221,31 +240,14 @@ fun FoldableLauncherLayout(
     onRecentFileClick: (com.android.developers.androidify.launcher.data.RecentFile) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var cumulativeDragY by remember { mutableFloatStateOf(0f) }
-    val swipeThresholdPx = 120f
-
     Column(
         modifier = modifier
             .fillMaxSize()
             .statusBarsPadding()
             .navigationBarsPadding()
-            .pointerInput(Unit) {
-                detectVerticalDragGestures(
-                    onDragStart = { cumulativeDragY = 0f },
-                    onVerticalDrag = { _, dragAmount ->
-                        cumulativeDragY += dragAmount
-                        if (cumulativeDragY < -swipeThresholdPx) {
-                            onSwipeUp()
-                            cumulativeDragY = 0f
-                        }
-                    },
-                    onDragEnd = { cumulativeDragY = 0f },
-                    onDragCancel = { cumulativeDragY = 0f },
-                )
-            },
+            .anchoredDraggable(drawerState, Orientation.Vertical),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // Wider 5-column grid for the unfolded display
         AppGrid(
             apps = uiState.allApps,
             columns = 5,
@@ -257,7 +259,6 @@ fun FoldableLauncherLayout(
 
         Spacer(Modifier.height(8.dp))
 
-        // Expanded search widget with Chrome tabs + recent files
         FoldableSearchWidget(
             chromeTabs = uiState.chromeTabs,
             recentFiles = uiState.recentFiles,
