@@ -16,6 +16,7 @@
 package com.android.developers.androidify
 
 import android.app.Service
+import android.content.ComponentName
 import android.content.Intent
 import android.os.IBinder
 
@@ -48,8 +49,11 @@ class AssistantNotesService : Service() {
         // Launch ultra-light note-taking version of the launcher.
         // For now this is a stub — a full implementation would show a minimal
         // Compose overlay window on the lock screen.
-        val launchIntent = Intent(this, MainActivity::class.java).apply {
-            action = ACTION_CREATE_NOTE
+        val launchIntent = Intent(ACTION_CREATE_NOTE).apply {
+            component = ComponentName(
+                this@AssistantNotesService,
+                "com.android.developers.androidify.MainActivity",
+            )
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         startActivity(launchIntent)
