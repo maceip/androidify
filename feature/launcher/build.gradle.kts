@@ -39,4 +39,9 @@ dependencies {
 
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.tooling.preview)
+
+    // Android Instrumented Tests
+    androidTestImplementation(libs.hilt.android.testing)
+    androidTestImplementation(projects.core.testing)
+    kspAndroidTest(libs.hilt.compiler)
 }
