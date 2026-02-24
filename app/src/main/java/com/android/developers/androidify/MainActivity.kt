@@ -18,7 +18,7 @@ package com.android.developers.androidify
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
-import android.window.OnBackInvokedDispatcher
+import android.window.OnBackInvokedCallback
 import android.window.TrustedPresentationThresholds
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -108,14 +108,17 @@ class MainActivity : ComponentActivity() {
      * completes. This is the "starting gun" for the Velocity Buffer, allowing us
      * to inject a higher synthetic velocity earlier in the animation pipeline.
      */
+    @Suppress("PrivateApi")
     private fun registerNavigationObserver() {
         if (Build.VERSION.SDK_INT >= 36) {
             try {
+                // PRIORITY_SYSTEM_NAVIGATION_OBSERVER is API 36+.
+                // Use the raw int value (0) to avoid compile-time dependency on SDK 36.
+                val priorityNavObserver = 0
                 onBackInvokedDispatcher.registerOnBackInvokedCallback(
-                    OnBackInvokedDispatcher.PRIORITY_SYSTEM_NAVIGATION_OBSERVER,
-                ) {
-                    MomentumBridge.inject(-3500f)
-                }
+                    priorityNavObserver,
+                    OnBackInvokedCallback { MomentumBridge.inject(-3500f) },
+                )
             } catch (_: Exception) {
                 // PRIORITY_SYSTEM_NAVIGATION_OBSERVER may not be available on all devices
             }

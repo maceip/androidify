@@ -38,7 +38,7 @@ class AssistantNotesService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == Intent.ACTION_CREATE_NOTE) {
+        if (intent?.action == ACTION_CREATE_NOTE) {
             handleCreateNote()
         }
         return START_NOT_STICKY
@@ -49,9 +49,13 @@ class AssistantNotesService : Service() {
         // For now this is a stub — a full implementation would show a minimal
         // Compose overlay window on the lock screen.
         val launchIntent = Intent(this, MainActivity::class.java).apply {
-            action = Intent.ACTION_CREATE_NOTE
+            action = ACTION_CREATE_NOTE
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         startActivity(launchIntent)
+    }
+
+    private companion object {
+        const val ACTION_CREATE_NOTE = "android.intent.action.CREATE_NOTE"
     }
 }
