@@ -75,7 +75,7 @@ fun ContextualAtAGlance(
         // Primary header: context-aware
         Text(
             text = when {
-                ctx.mediaTitle != null -> "Now Playing: ${ctx.mediaTitle}"
+                ctx.mediaInfo?.title != null -> "Now Playing: ${ctx.mediaInfo?.title}"
                 ctx.packageName == "com.android.chrome" -> "Continue reading..."
                 else -> getFormattedDate()
             },
@@ -87,14 +87,7 @@ fun ContextualAtAGlance(
 
         // Secondary info line
         Text(
-            text = when {
-                ctx.mediaMetadata != null -> {
-                    val artist = ctx.mediaMetadata
-                        ?.getString(android.support.v4.media.MediaMetadataCompat.METADATA_KEY_ARTIST)
-                    artist ?: ""
-                }
-                else -> ""
-            },
+            text = ctx.mediaInfo?.artist ?: "",
             style = MaterialTheme.typography.bodyMedium,
             color = Color.White.copy(alpha = 0.7f),
         )
@@ -109,11 +102,11 @@ fun ContextualAtAGlance(
         }
 
         // Now-playing card: shown when media is active
-        if (ctx.mediaTitle != null) {
+        val media = ctx.mediaInfo
+        if (media?.title != null) {
             NowPlayingCard(
-                title = ctx.mediaTitle ?: "",
-                artist = ctx.mediaMetadata
-                    ?.getString(android.support.v4.media.MediaMetadataCompat.METADATA_KEY_ARTIST),
+                title = media.title,
+                artist = media.artist,
             )
         }
     }

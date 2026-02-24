@@ -15,7 +15,6 @@
  */
 package com.android.developers.androidify.launcher.platform
 
-import android.support.v4.media.MediaMetadataCompat
 import androidx.compose.runtime.mutableStateOf
 
 /**
@@ -25,10 +24,15 @@ import androidx.compose.runtime.mutableStateOf
  * and the Notes Role into a single observable [ActiveContext]. The At-a-Glance
  * engine reads [current] to decide which contextual widget to show.
  */
+data class MediaInfo(
+    val title: String? = null,
+    val artist: String? = null,
+    val album: String? = null,
+)
+
 data class ActiveContext(
     val packageName: String = "root",
-    val mediaMetadata: MediaMetadataCompat? = null,
-    val mediaTitle: String? = null,
+    val mediaInfo: MediaInfo? = null,
     val lastNoteSnippet: String? = null,
     val velocity: Float = 0f,
 )
@@ -37,9 +41,9 @@ object ContextEngine {
 
     var current = mutableStateOf(ActiveContext())
 
-    fun updateMedia(meta: MediaMetadataCompat?) {
-        val title = meta?.getString(MediaMetadataCompat.METADATA_KEY_TITLE)
-        current.value = current.value.copy(mediaMetadata = meta, mediaTitle = title)
+    fun updateMedia(title: String?, artist: String?, album: String?) {
+        val info = if (title != null) MediaInfo(title, artist, album) else null
+        current.value = current.value.copy(mediaInfo = info)
     }
 
     fun updateApp(pkg: String) {

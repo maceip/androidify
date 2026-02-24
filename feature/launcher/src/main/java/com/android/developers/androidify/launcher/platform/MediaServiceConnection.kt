@@ -17,111 +17,47 @@ package com.android.developers.androidify.launcher.platform
 
 import android.content.ComponentName
 import android.content.Context
+import android.media.MediaMetadata
 import android.media.session.MediaSessionManager
-import android.support.v4.media.MediaBrowserCompat
-import android.support.v4.media.MediaMetadataCompat
-import android.support.v4.media.session.MediaControllerCompat
-import android.support.v4.media.session.PlaybackStateCompat
 
 /**
- * [F] Media Browser API — Direct connection to the currently-playing app's
- * MediaBrowserService via [MediaBrowserCompat].
+ * [F] Media Browser API — Connects to the active media session to extract
+ * now-playing metadata (title, artist, album) with zero latency.
  *
- * Yields high-res album art, track metadata, and playback state with zero latency —
- * unlike the notification-listener approach which parses RemoteViews.
- *
- * Feeds metadata into [ContextEngine] so the At-a-Glance engine can display
- * "Now Playing" information in perfect sync with the icon grid animations.
+ * Uses [MediaSessionManager] to discover the active session via the
+ * notification listener component. Feeds metadata into [ContextEngine]
+ * so the At-a-Glance engine can display "Now Playing" information.
  */
 class MediaServiceConnection(private val context: Context) {
-
-    private var mediaBrowser: MediaBrowserCompat? = null
-    private var mediaController: MediaControllerCompat? = null
-
-    private val connectionCallbacks = object : MediaBrowserCompat.ConnectionCallback() {
-        override fun onConnected() {
-            val browser = mediaBrowser ?: return
-            val token = browser.sessionToken
-            mediaController = MediaControllerCompat(context, token).also { controller ->
-                ContextEngine.updateMedia(controller.metadata)
-                controller.registerCallback(controllerCallback)
-            }
-        }
-
-        override fun onConnectionSuspended() {
-            mediaController?.unregisterCallback(controllerCallback)
-            mediaController = null
-        }
-
-        override fun onConnectionFailed() {
-            mediaController = null
-        }
-    }
-
-    private val controllerCallback = object : MediaControllerCompat.Callback() {
-        override fun onMetadataChanged(metadata: MediaMetadataCompat?) {
-            ContextEngine.updateMedia(metadata)
-        }
-
-        override fun onPlaybackStateChanged(state: PlaybackStateCompat?) {
-            // Could extend ContextEngine with playback state if needed
-        }
-    }
-
-    /**
-     * Connect to a specific media app's MediaBrowserService.
-     */
-    fun connect(targetPackage: String, serviceName: String) {
-        disconnect()
-        mediaBrowser = MediaBrowserCompat(
-            context,
-            ComponentName(targetPackage, serviceName),
-            connectionCallbacks,
-            null,
-        ).apply { connect() }
-    }
 
     /**
      * Attempt to connect to the currently active media session.
      * Uses [MediaSessionManager] to discover the active session and then
-     * connects via MediaBrowser if a service component is found.
+     * extracts metadata directly from the framework media controller.
      */
     fun connectToActiveSession() {
         val sessionManager = context.getSystemService(Context.MEDIA_SESSION_SERVICE)
             as? MediaSessionManager ?: return
         try {
             val controllers = sessionManager.getActiveSessions(
-                ComponentName(context, "com.android.developers.androidify.LauncherNotificationListenerService"),
+                ComponentName(
+                    context,
+                    "com.android.developers.androidify.LauncherNotificationListenerService",
+                ),
             )
             val activeSession = controllers.firstOrNull() ?: return
-            val metadata = activeSession.metadata
-            if (metadata != null) {
-                ContextEngine.updateMedia(
-                    MediaMetadataCompat.Builder()
-                        .putString(
-                            MediaMetadataCompat.METADATA_KEY_TITLE,
-                            metadata.getString(android.media.MediaMetadata.METADATA_KEY_TITLE),
-                        )
-                        .putString(
-                            MediaMetadataCompat.METADATA_KEY_ARTIST,
-                            metadata.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST),
-                        )
-                        .putString(
-                            MediaMetadataCompat.METADATA_KEY_ALBUM,
-                            metadata.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM),
-                        )
-                        .build(),
-                )
-            }
+            val metadata = activeSession.metadata ?: return
+            ContextEngine.updateMedia(
+                title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE),
+                artist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST),
+                album = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM),
+            )
         } catch (_: SecurityException) {
             // Notification listener not enabled
         }
     }
 
     fun disconnect() {
-        mediaController?.unregisterCallback(controllerCallback)
-        mediaController = null
-        mediaBrowser?.disconnect()
-        mediaBrowser = null
+        // Clean up if needed in future when persistent connections are added
     }
 }

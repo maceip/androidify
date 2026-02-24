@@ -32,8 +32,6 @@ dependencies {
     implementation(libs.androidx.hilt.navigation.compose)
     implementation(libs.androidx.window)
     implementation(libs.androidx.datastore.preferences)
-    // [F] Media Browser API for At-a-Glance now-playing integration
-    implementation("androidx.media:media:1.7.0")
     ksp(libs.hilt.compiler)
 
     implementation(projects.core.theme)
