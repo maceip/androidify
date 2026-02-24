@@ -17,7 +17,7 @@ package com.android.developers.androidify.launcher.ui
 
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.rememberSplineBasedDecay
+import androidx.compose.animation.core.exponentialDecay
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.AnchoredDraggableState
 import androidx.compose.foundation.gestures.DraggableAnchors
@@ -73,7 +73,7 @@ fun LauncherHomeScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val density = LocalDensity.current
-    val decaySpec = rememberSplineBasedDecay<Float>()
+    val decaySpec = remember { exponentialDecay<Float>() }
     val scope = rememberCoroutineScope()
 
     val drawerState = remember {
@@ -219,6 +219,7 @@ private fun PhoneLauncherLayout(
             onSearch = onSearch,
             onVoiceSearch = onVoiceSearch,
             onLensSearch = onLensSearch,
+            onWidgetAction = {},
         )
     }
 }

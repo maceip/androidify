@@ -76,6 +76,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.android.developers.androidify.launcher.data.AppInfo
+import com.android.developers.androidify.launcher.data.WidgetContextAction
 
 // Google brand colours used across the bottom bar
 private val GoogleBlue = Color(0xFF4285F4)
