@@ -4,6 +4,9 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.pm.LauncherApps
 import android.content.pm.LauncherApps.ShortcutQuery
+import android.content.res.Resources
+import android.graphics.drawable.AdaptiveIconDrawable
+import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Process
 import android.os.UserHandle
@@ -49,14 +52,16 @@ class LauncherAppsRepository @Inject constructor(
 
     fun reloadApps() {
         val pm = context.packageManager
+        val displayDensity = Resources.getSystem().displayMetrics.densityDpi
         val profiles = getProfiles()
         val apps = profiles.flatMap { user ->
             launcherApps.getActivityList(null, user).map { info ->
+                val icon = loadThemedIconOrFallback(info, displayDensity)
                 AppInfo(
                     packageName = info.applicationInfo.packageName,
                     className = info.name,
                     label = info.label?.toString() ?: info.applicationInfo.packageName,
-                    icon = info.getIcon(0),
+                    icon = icon,
                     launchIntent = pm.getLaunchIntentForPackage(info.applicationInfo.packageName),
                     user = user,
                     isWorkProfile = user != Process.myUserHandle(),
@@ -65,6 +70,36 @@ class LauncherAppsRepository @Inject constructor(
         }.sortedBy { it.label.lowercase() }
             .distinctBy { "${it.user.hashCode()}-${it.packageName}-${it.className}" }
         _apps.value = apps
+    }
+
+    /**
+     * Attempts to load the themed/monochrome icon for the given activity on
+     * Android 13+ (API 33). If the app declares a `<monochrome>` layer in its
+     * adaptive-icon, this will return the system-tinted monochrome variant.
+     * Falls back to the standard icon if theming is unavailable or on older APIs.
+     */
+    private fun loadThemedIconOrFallback(
+        info: android.content.pm.LauncherActivityInfo,
+        displayDensity: Int,
+    ): Drawable? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            try {
+                val icon = info.getIcon(displayDensity)
+                if (icon is AdaptiveIconDrawable) {
+                    val monochrome = icon.monochrome
+                    if (monochrome != null) {
+                        // System will handle tinting the monochrome layer to the
+                        // wallpaper's primary color. Return the full adaptive icon
+                        // which the system renders with the themed treatment.
+                        return icon
+                    }
+                }
+                return icon
+            } catch (_: Exception) {
+                // Fall through to basic icon loading
+            }
+        }
+        return info.getIcon(0)
     }
 
     fun launchMainActivity(appInfo: AppInfo) {

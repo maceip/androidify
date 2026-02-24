@@ -15,6 +15,7 @@
  */
 package com.android.developers.androidify.launcher.ui
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
@@ -50,6 +51,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -64,7 +66,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -77,6 +81,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.android.developers.androidify.launcher.data.AppInfo
 import com.android.developers.androidify.launcher.data.WidgetContextAction
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 // Google brand colours used across the bottom bar
 private val GoogleBlue = Color(0xFF4285F4)
@@ -85,12 +91,15 @@ private val GoogleYellow = Color(0xFFFBBC05)
 private val GoogleGreen = Color(0xFF34A853)
 
 /**
- * Full Pixel-Launcher-style bottom chrome:
+ * Full Pixel-Launcher-style bottom chrome with staggered entrance animations:
  *
- * 1. **AI search bar** — small translucent pill with sparkle icon (top)
- * 2. **Dock row** — 3 pinned apps + 1 AI-suggested slot with a pulsing glow ring
- * 3. **Google search bar** — large white pill with the Google G logo, Gemini sparkle,
- *    mic, and lens icons (bottom)
+ * 1. **Google search bar** — appears first with a scale-up spring from the bottom
+ * 2. **Dock row** — cascades upward from behind the search bar, each icon staggered
+ * 3. **AI search bar** — slides in last from below with a gentle spring
+ *
+ * On open: the search bar is always present; dock and AI bar spring upward with
+ * staggered delays and overshoot. On close (controlled by [expanded]), everything
+ * collapses back into the search bar with a smooth settle animation.
  */
 @Composable
 fun PixelBottomBar(
@@ -102,32 +111,144 @@ fun PixelBottomBar(
     onLensSearch: () -> Unit,
     onWidgetAction: (WidgetContextAction) -> Unit,
     modifier: Modifier = Modifier,
+    expanded: Boolean = true,
 ) {
+    // Staggered reveal animatables: search bar -> dock row -> AI bar
+    val searchBarReveal = remember { Animatable(0f) }
+    val dockRowReveal = remember { Animatable(0f) }
+    val aiBarReveal = remember { Animatable(0f) }
+    // Per-icon stagger (up to 4 icons)
+    val iconReveals = remember { List(4) { Animatable(0f) } }
+
+    LaunchedEffect(expanded) {
+        if (expanded) {
+            // Open: staggered cascade from bottom
+            launch {
+                searchBarReveal.animateTo(
+                    1f,
+                    animationSpec = spring(
+                        dampingRatio = 0.7f,
+                        stiffness = Spring.StiffnessMediumLow,
+                    ),
+                )
+            }
+            delay(80)
+            launch {
+                dockRowReveal.animateTo(
+                    1f,
+                    animationSpec = spring(
+                        dampingRatio = 0.65f,
+                        stiffness = Spring.StiffnessMediumLow,
+                    ),
+                )
+            }
+            // Stagger each dock icon
+            iconReveals.forEachIndexed { index, anim ->
+                delay(45)
+                launch {
+                    anim.animateTo(
+                        1f,
+                        animationSpec = spring(
+                            dampingRatio = 0.6f,
+                            stiffness = Spring.StiffnessMedium,
+                        ),
+                    )
+                }
+            }
+            delay(60)
+            launch {
+                aiBarReveal.animateTo(
+                    1f,
+                    animationSpec = spring(
+                        dampingRatio = 0.7f,
+                        stiffness = Spring.StiffnessMediumLow,
+                    ),
+                )
+            }
+        } else {
+            // Close: reverse cascade, AI bar first, search bar last
+            launch {
+                aiBarReveal.animateTo(
+                    0f,
+                    animationSpec = tween(180, easing = FastOutSlowInEasing),
+                )
+            }
+            delay(40)
+            iconReveals.reversed().forEach { anim ->
+                launch {
+                    anim.animateTo(
+                        0f,
+                        animationSpec = tween(150, easing = FastOutSlowInEasing),
+                    )
+                }
+                delay(30)
+            }
+            launch {
+                dockRowReveal.animateTo(
+                    0f,
+                    animationSpec = tween(200, easing = FastOutSlowInEasing),
+                )
+            }
+            delay(60)
+            launch {
+                searchBarReveal.animateTo(
+                    0f,
+                    animationSpec = tween(220, easing = FastOutSlowInEasing),
+                )
+            }
+        }
+    }
+
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        // ── 1. AI / web search bar ──────────────────────────────────────────
+        // ── 1. AI / web search bar ─ reveals last, collapses first ──────────
         AiSearchBar(
             onTap = { onSearch("") },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    val p = aiBarReveal.value
+                    alpha = p
+                    scaleX = 0.85f + 0.15f * p
+                    scaleY = 0.85f + 0.15f * p
+                    translationY = (1f - p) * 48f
+                    transformOrigin = TransformOrigin(0.5f, 1f)
+                },
         )
 
-        // ── 2. Dock ─────────────────────────────────────────────────────────
+        // ── 2. Dock ─ reveals second with per-icon cascade ─────────────────
         DockRow(
             dockApps = dockApps,
             suggestedApp = suggestedApp,
             onAppClick = onAppClick,
-            modifier = Modifier.fillMaxWidth(),
+            iconReveals = iconReveals.map { it.value },
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    val p = dockRowReveal.value
+                    alpha = p
+                    translationY = (1f - p) * 64f
+                    transformOrigin = TransformOrigin(0.5f, 1f)
+                },
         )
 
-        // ── 3. Google search bar ─────────────────────────────────────────────
+        // ── 3. Google search bar ─ reveals first, always anchor ─────────────
         GoogleSearchBar(
             onSearch = onSearch,
             onVoiceSearch = onVoiceSearch,
             onLensSearch = onLensSearch,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    val p = searchBarReveal.value
+                    scaleX = 0.92f + 0.08f * p
+                    scaleY = 0.92f + 0.08f * p
+                    alpha = 0.6f + 0.4f * p
+                    transformOrigin = TransformOrigin(0.5f, 0.5f)
+                },
         )
     }
 }
@@ -190,6 +311,7 @@ private fun DockRow(
     dockApps: List<AppInfo>,
     suggestedApp: AppInfo?,
     onAppClick: (AppInfo) -> Unit,
+    iconReveals: List<Float> = List(4) { 1f },
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -197,12 +319,23 @@ private fun DockRow(
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Regular pinned dock apps (up to 3)
-        dockApps.forEach { app ->
-            DockIconItem(
-                app = app,
-                onClick = { onAppClick(app) },
-            )
+        // Regular pinned dock apps (up to 3) with staggered reveal
+        dockApps.forEachIndexed { index, app ->
+            val reveal = iconReveals.getOrElse(index) { 1f }
+            Box(
+                modifier = Modifier.graphicsLayer {
+                    scaleX = 0.3f + 0.7f * reveal
+                    scaleY = 0.3f + 0.7f * reveal
+                    alpha = reveal
+                    translationY = (1f - reveal) * 40f
+                    rotationZ = (1f - reveal) * -12f
+                },
+            ) {
+                DockIconItem(
+                    app = app,
+                    onClick = { onAppClick(app) },
+                )
+            }
         }
 
         // Fill remaining dock slots so the AI slot always lands in position 4
@@ -210,11 +343,22 @@ private fun DockRow(
             Spacer(Modifier.size(DOCK_ICON_SIZE))
         }
 
-        // AI-suggested / mystery slot
-        AiPickSlot(
-            app = suggestedApp,
-            onClick = { suggestedApp?.let(onAppClick) },
-        )
+        // AI-suggested / mystery slot with its own reveal
+        val aiReveal = iconReveals.getOrElse(3) { 1f }
+        Box(
+            modifier = Modifier.graphicsLayer {
+                scaleX = 0.3f + 0.7f * aiReveal
+                scaleY = 0.3f + 0.7f * aiReveal
+                alpha = aiReveal
+                translationY = (1f - aiReveal) * 40f
+                rotationZ = (1f - aiReveal) * 12f
+            },
+        ) {
+            AiPickSlot(
+                app = suggestedApp,
+                onClick = { suggestedApp?.let(onAppClick) },
+            )
+        }
     }
 }
 
