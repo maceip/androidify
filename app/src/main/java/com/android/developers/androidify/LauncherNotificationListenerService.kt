@@ -20,7 +20,7 @@ class LauncherNotificationListenerService : NotificationListenerService() {
         rebuildCounts(activeNotifications.orEmpty())
     }
 
-    private fun rebuildCounts(notifications: Array<StatusBarNotification>) {
+    private fun rebuildCounts(notifications: Array<out StatusBarNotification>) {
         val counts = notifications
             .filter { !it.isOngoing }
             .groupingBy { it.packageName }
