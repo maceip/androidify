@@ -77,6 +77,7 @@ import android.os.Process
 import com.android.developers.androidify.launcher.LauncherViewModel
 import com.android.developers.androidify.launcher.data.AppInfo
 import com.android.developers.androidify.launcher.data.LauncherLayoutType
+import com.android.developers.androidify.launcher.platform.MomentumBridge
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlinx.coroutines.launch
@@ -783,6 +784,25 @@ private fun PhoneLauncherLayout(
         label = "contentAlpha",
     )
 
+    // [A] Velocity Buffer: consume MomentumBridge and drive spring animation
+    val velocity = MomentumBridge.initialVelocity.floatValue
+    val timestamp = MomentumBridge.triggerTime.longValue
+    val translationY = remember { Animatable(0f) }
+
+    LaunchedEffect(timestamp) {
+        if (timestamp > 0) {
+            translationY.snapTo(800f)
+            translationY.animateTo(
+                targetValue = 0f,
+                initialVelocity = velocity,
+                animationSpec = spring(
+                    dampingRatio = 0.6f,
+                    stiffness = 150f,
+                ),
+            )
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -793,12 +813,22 @@ private fun PhoneLauncherLayout(
             .anchoredDraggable(drawerState, Orientation.Vertical)
             .alpha(contentAlpha),
     ) {
+        // [D] At-a-Glance: velocity-matched contextual widget above the grid
+        ContextualAtAGlance(yOffset = translationY.value)
+
+        // [A] Velocity-driven grid with scale compression
         AppGrid(
             apps = uiState.allApps,
             columns = 4,
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f),
+                .weight(1f)
+                .graphicsLayer {
+                    this.translationY = translationY.value
+                    val scale = 1f - (translationY.value / 5000f)
+                    this.scaleX = scale.coerceIn(0.9f, 1f)
+                    this.scaleY = scale.coerceIn(0.9f, 1f)
+                },
             onAppClick = onAppClick,
         )
 
@@ -836,6 +866,25 @@ fun FoldableLauncherLayout(
     onRecentFileClick: (com.android.developers.androidify.launcher.data.RecentFile) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // [A] Velocity Buffer for foldable layout
+    val velocity = MomentumBridge.initialVelocity.floatValue
+    val timestamp = MomentumBridge.triggerTime.longValue
+    val translationY = remember { Animatable(0f) }
+
+    LaunchedEffect(timestamp) {
+        if (timestamp > 0) {
+            translationY.snapTo(800f)
+            translationY.animateTo(
+                targetValue = 0f,
+                initialVelocity = velocity,
+                animationSpec = spring(
+                    dampingRatio = 0.6f,
+                    stiffness = 150f,
+                ),
+            )
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -844,12 +893,21 @@ fun FoldableLauncherLayout(
             .anchoredDraggable(drawerState, Orientation.Vertical),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        // [D] At-a-Glance for foldable
+        ContextualAtAGlance(yOffset = translationY.value)
+
         AppGrid(
             apps = uiState.allApps,
             columns = 5,
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f),
+                .weight(1f)
+                .graphicsLayer {
+                    this.translationY = translationY.value
+                    val scale = 1f - (translationY.value / 5000f)
+                    this.scaleX = scale.coerceIn(0.9f, 1f)
+                    this.scaleY = scale.coerceIn(0.9f, 1f)
+                },
             onAppClick = onAppClick,
         )
 
