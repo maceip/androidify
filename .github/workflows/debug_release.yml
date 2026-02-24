@@ -59,24 +59,37 @@ jobs:
           fi
 
       - name: Build debug APK
+        run: ./gradlew assembleDebug --no-configuration-cache --stacktrace 2>&1 | tee /tmp/build.log || true
+
+      - name: Check build result and report errors
+        if: always()
         run: |
-          set +e
-          ./gradlew assembleDebug --no-configuration-cache --stacktrace 2>&1 | tee /tmp/build.log
-          BUILD_RC=${PIPESTATUS[0]}
-          if [ $BUILD_RC -ne 0 ]; then
-            # Extract error lines (Kotlin uses "e:" prefix, Gradle uses "ERROR")
-            grep -iE "^e:|error|FAILURE|failure|exception" /tmp/build.log | tail -30 | while IFS= read -r line; do
-              echo "::error::BUILD_ERR: $line"
-            done
-            # Write last 120 lines to step summary
-            {
-              echo "## Build Failed - Last 120 lines"
-              echo '```'
-              tail -120 /tmp/build.log
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
+          if [ -f /tmp/build.log ]; then
+            if grep -q "BUILD FAILED\|BUILD SUCCESSFUL" /tmp/build.log; then
+              if grep -q "BUILD FAILED" /tmp/build.log; then
+                echo "::error::Build failed. Dumping last 40 lines:"
+                tail -40 /tmp/build.log | while IFS= read -r line; do
+                  echo "::error::$line"
+                done
+                {
+                  echo "## Build Failed"
+                  echo '```'
+                  tail -120 /tmp/build.log
+                  echo '```'
+                } >> "$GITHUB_STEP_SUMMARY"
+                exit 1
+              fi
+            else
+              echo "::error::Build log exists but no BUILD FAILED/SUCCESSFUL found. Last 40 lines:"
+              tail -40 /tmp/build.log | while IFS= read -r line; do
+                echo "::error::$line"
+              done
+              exit 1
+            fi
+          else
+            echo "::error::No build log found"
+            exit 1
           fi
-          exit $BUILD_RC
 
       - name: Get APK path and build info
         id: apk_info
