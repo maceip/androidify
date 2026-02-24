@@ -31,6 +31,7 @@ dependencies {
     implementation(libs.hilt.android)
     implementation(libs.androidx.hilt.navigation.compose)
     implementation(libs.androidx.window)
+    implementation(libs.androidx.datastore.preferences)
     ksp(libs.hilt.compiler)
 
     implementation(projects.core.theme)

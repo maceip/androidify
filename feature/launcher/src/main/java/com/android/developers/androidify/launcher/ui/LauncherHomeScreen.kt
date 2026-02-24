@@ -240,9 +240,11 @@ fun LauncherHomeScreen(
                 viewModel.launchApp(
                     AppInfo(
                         packageName = task.packageName,
+                        className = "",
                         label = task.label,
                         icon = task.icon,
                         launchIntent = null,
+                        user = Process.myUserHandle(),
                     ),
                 )
                 scope.launch { drawerState.animateTo(DrawerValue.Collapsed) }

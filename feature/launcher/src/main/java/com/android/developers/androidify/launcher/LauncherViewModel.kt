@@ -16,9 +16,9 @@
 package com.android.developers.androidify.launcher
 
 import android.app.ActivityManager
+import android.appwidget.AppWidgetProviderInfo
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.database.ContentObserver
 import android.net.Uri
 import android.os.Build
@@ -29,35 +29,43 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.android.developers.androidify.launcher.data.AppInfo
 import com.android.developers.androidify.launcher.data.ChromeTab
+import com.android.developers.androidify.launcher.data.LauncherShortcut
 import com.android.developers.androidify.launcher.data.RecentFile
 import com.android.developers.androidify.launcher.data.RecentTask
+import com.android.developers.androidify.launcher.platform.LauncherAppsRepository
+import com.android.developers.androidify.launcher.platform.LauncherLayoutStore
+import com.android.developers.androidify.launcher.platform.LauncherWidgetHostController
+import com.android.developers.androidify.launcher.platform.NotificationDotsStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 data class LauncherUiState(
     val allApps: List<AppInfo> = emptyList(),
     val filteredApps: List<AppInfo> = emptyList(),
-    /** Up to 3 pinned dock apps sourced from common installed packages. */
     val dockApps: List<AppInfo> = emptyList(),
-    /** AI-suggested app for the fourth dock slot — null shows the mystery placeholder. */
     val suggestedApp: AppInfo? = null,
     val recentTasks: List<RecentTask> = emptyList(),
     val recentFiles: List<RecentFile> = emptyList(),
     val chromeTabs: List<ChromeTab> = emptyList(),
     val searchQuery: String = "",
     val isLoading: Boolean = true,
+    val pinnedWidgetIds: Set<Int> = emptySet(),
 )
 
 @HiltViewModel
 class LauncherViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val launcherAppsRepository: LauncherAppsRepository,
+    private val launcherLayoutStore: LauncherLayoutStore,
+    private val launcherWidgetHostController: LauncherWidgetHostController,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(LauncherUiState())
@@ -70,9 +78,10 @@ class LauncherViewModel @Inject constructor(
     }
 
     init {
-        loadInstalledApps()
         loadRecentTasks()
         loadRecentFiles()
+        observeApps()
+        observePinnedWidgets()
         context.contentResolver.registerContentObserver(
             MediaStore.Files.getContentUri("external"),
             true,
@@ -83,6 +92,11 @@ class LauncherViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         context.contentResolver.unregisterContentObserver(mediaContentObserver)
+        launcherWidgetHostController.stopListening()
+    }
+
+    fun startWidgetHost() {
+        launcherWidgetHostController.startListening()
     }
 
     fun updateSearchQuery(query: String) {
@@ -103,46 +117,114 @@ class LauncherViewModel @Inject constructor(
         loadRecentTasks()
     }
 
-    private fun loadInstalledApps() {
+    fun launchApp(appInfo: AppInfo) {
+        launcherAppsRepository.launchMainActivity(appInfo)
+    }
+
+    fun loadShortcutsForPackage(packageName: String, onResult: (List<LauncherShortcut>) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
-            val pm = context.packageManager
-            val mainIntent = Intent(Intent.ACTION_MAIN).apply {
-                addCategory(Intent.CATEGORY_LAUNCHER)
+            onResult(launcherAppsRepository.getShortcuts(packageName))
+        }
+    }
+
+    fun launchShortcut(shortcut: LauncherShortcut) {
+        launcherAppsRepository.startShortcut(shortcut)
+    }
+
+    fun pinShortcut(shortcut: LauncherShortcut) {
+        launcherAppsRepository.pinShortcuts(shortcut.packageName, shortcut.user, listOf(shortcut.id))
+    }
+
+    fun requestPinWidget(providerInfo: AppWidgetProviderInfo): Boolean =
+        launcherWidgetHostController.requestPinAppWidget(providerInfo.provider)
+
+    fun addWidget(widgetId: Int) {
+        viewModelScope.launch {
+            launcherLayoutStore.addPinnedWidgetId(widgetId)
+        }
+    }
+
+    fun launchWallpaperPicker() {
+        val wallpaperIntent = Intent(Intent.ACTION_SET_WALLPAPER).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { context.startActivity(wallpaperIntent) }
+    }
+
+    fun launchSearch(query: String) {
+        val intent = Intent(Intent.ACTION_WEB_SEARCH).apply {
+            putExtra("query", query)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }.takeIf { it.resolveActivity(context.packageManager) != null }
+            ?: Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=${Uri.encode(query)}")).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            val resolvedApps = pm.queryIntentActivities(mainIntent, PackageManager.MATCH_ALL)
-            val apps = resolvedApps
-                .map { resolveInfo ->
-                    AppInfo(
-                        packageName = resolveInfo.activityInfo.packageName,
-                        label = resolveInfo.loadLabel(pm).toString(),
-                        icon = resolveInfo.loadIcon(pm),
-                        launchIntent = pm.getLaunchIntentForPackage(
-                            resolveInfo.activityInfo.packageName,
-                        ),
+        runCatching { context.startActivity(intent) }
+    }
+
+    fun launchVoiceSearch() {
+        val intent = Intent("android.speech.action.VOICE_SEARCH_HANDS_FREE").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { context.startActivity(intent) }
+    }
+
+    fun launchLensSearch() {
+        val lensIntent = Intent(Intent.ACTION_VIEW).apply {
+            setPackage("com.google.ar.lens")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }.takeIf { it.resolveActivity(context.packageManager) != null }
+            ?: Intent(Intent.ACTION_VIEW, Uri.parse("intent://lens/#Intent;scheme=googlelens;end")).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        runCatching { context.startActivity(lensIntent) }
+    }
+
+    fun openRecentFile(recentFile: RecentFile) {
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(recentFile.uri, recentFile.mimeType)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        runCatching { context.startActivity(intent) }
+    }
+
+    private fun observeApps() {
+        viewModelScope.launch {
+            combine(
+                launcherAppsRepository.apps,
+                NotificationDotsStore.counts,
+            ) { apps, notificationCounts ->
+                apps.map { it.copy(notificationCount = notificationCounts[it.packageName] ?: 0) }
+            }.collect { apps ->
+                val dockApps = DOCK_PACKAGE_PRIORITY.mapNotNull { pkg -> apps.find { it.packageName == pkg } }.take(3)
+                val suggestedApp = SUGGESTED_PACKAGE_PRIORITY
+                    .mapNotNull { pkg -> apps.find { it.packageName == pkg } }
+                    .firstOrNull { it !in dockApps }
+                _uiState.update { state ->
+                    val filtered = if (state.searchQuery.isBlank()) {
+                        apps
+                    } else {
+                        apps.filter {
+                            it.label.contains(state.searchQuery, ignoreCase = true) ||
+                                it.packageName.contains(state.searchQuery, ignoreCase = true)
+                        }
+                    }
+                    state.copy(
+                        allApps = apps,
+                        filteredApps = filtered,
+                        dockApps = dockApps,
+                        suggestedApp = suggestedApp,
+                        isLoading = false,
                     )
                 }
-                .sortedBy { it.label.lowercase() }
-                .distinctBy { it.packageName }
+            }
+        }
+    }
 
-            // Pick up to 3 dock apps from the preferred package list, in order
-            val dockApps = DOCK_PACKAGE_PRIORITY
-                .mapNotNull { pkg -> apps.find { it.packageName == pkg } }
-                .take(3)
-
-            // Suggested app: first installed app from the "contextual pick" list
-            // that isn't already in the dock
-            val suggestedApp = SUGGESTED_PACKAGE_PRIORITY
-                .mapNotNull { pkg -> apps.find { it.packageName == pkg } }
-                .firstOrNull { it !in dockApps }
-
-            _uiState.update { state ->
-                state.copy(
-                    allApps = apps,
-                    filteredApps = if (state.searchQuery.isBlank()) apps else state.filteredApps,
-                    dockApps = dockApps,
-                    suggestedApp = suggestedApp,
-                    isLoading = false,
-                )
+    private fun observePinnedWidgets() {
+        viewModelScope.launch {
+            launcherLayoutStore.pinnedWidgetIds.collect { ids ->
+                _uiState.update { it.copy(pinnedWidgetIds = ids) }
             }
         }
     }
@@ -150,42 +232,25 @@ class LauncherViewModel @Inject constructor(
     @Suppress("DEPRECATION")
     private fun loadRecentTasks() {
         viewModelScope.launch(Dispatchers.IO) {
-            val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE)
-                as ActivityManager
+            val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             val pm = context.packageManager
-
-            // getRecentTasks is limited on API 21+ for privacy — returns own tasks + a few others
             val tasks = try {
-                activityManager.getRecentTasks(
-                    MAX_RECENT_TASKS,
-                    ActivityManager.RECENT_IGNORE_UNAVAILABLE,
-                )?.mapNotNull { taskInfo ->
-                    val packageName = taskInfo.baseActivity?.packageName ?: return@mapNotNull null
-                    // Skip our own app in the recents list
-                    if (packageName == context.packageName) return@mapNotNull null
-                    val icon = try {
-                        pm.getApplicationIcon(packageName)
-                    } catch (e: PackageManager.NameNotFoundException) {
-                        null
+                activityManager.getRecentTasks(MAX_RECENT_TASKS, ActivityManager.RECENT_IGNORE_UNAVAILABLE)
+                    .mapNotNull { recentTaskInfo ->
+                        val packageName = recentTaskInfo.baseIntent?.component?.packageName ?: return@mapNotNull null
+                        val app = _uiState.value.allApps.find { it.packageName == packageName }
+                        RecentTask(
+                            id = recentTaskInfo.id,
+                            label = app?.label ?: packageName,
+                            packageName = packageName,
+                            icon = app?.icon ?: pm.getApplicationIcon(packageName),
+                            thumbnail = null,
+                        )
                     }
-                    val label = try {
-                        pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString()
-                    } catch (e: PackageManager.NameNotFoundException) {
-                        packageName
-                    }
-                    RecentTask(
-                        id = taskInfo.id,
-                        label = label,
-                        packageName = packageName,
-                        icon = icon,
-                        thumbnail = null, // Thumbnails require system-level permission
-                    )
-                } ?: emptyList()
-            } catch (e: SecurityException) {
+            } catch (_: Exception) {
                 emptyList()
             }
-
-            _uiState.update { state -> state.copy(recentTasks = tasks) }
+            _uiState.update { it.copy(recentTasks = tasks) }
         }
     }
 
@@ -198,13 +263,9 @@ class LauncherViewModel @Inject constructor(
                 MediaStore.Files.FileColumns.MIME_TYPE,
                 MediaStore.Files.FileColumns.DATE_MODIFIED,
             )
-            val sortOrder = "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
-            val selection = "${MediaStore.Files.FileColumns.MIME_TYPE} IN (${
-                RECENT_FILE_MIME_TYPES.joinToString { "'$it'" }
-            })"
-
-            try {
-                val cursor = context.contentResolver.query(
+            val selection = "${MediaStore.Files.FileColumns.MIME_TYPE} IN (${RECENT_FILE_MIME_TYPES.joinToString { "'$it'" }})"
+            val cursor = runCatching {
+                context.contentResolver.query(
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
                     } else {
@@ -213,116 +274,36 @@ class LauncherViewModel @Inject constructor(
                     projection,
                     selection,
                     null,
-                    sortOrder,
+                    "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC",
                 )
-                cursor?.use {
-                    val idCol = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
-                    val nameCol = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
-                    val mimeCol = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MIME_TYPE)
-                    val modifiedCol = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
-
-                    var count = 0
-                    while (it.moveToNext() && count < MAX_RECENT_FILES) {
-                        val id = it.getLong(idCol)
-                        val name = it.getString(nameCol) ?: continue
-                        val mime = it.getString(mimeCol) ?: continue
-                        val modified = it.getLong(modifiedCol)
-                        val contentUri = Uri.withAppendedPath(
-                            MediaStore.Files.getContentUri("external"),
-                            id.toString(),
-                        )
-                        files.add(
-                            RecentFile(
-                                name = name,
-                                mimeType = mime,
-                                uri = contentUri,
-                                thumbnail = null,
-                                modifiedTime = modified,
-                            ),
-                        )
-                        count++
-                    }
+            }.getOrNull()
+            cursor?.use {
+                val idCol = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
+                val nameCol = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
+                val mimeCol = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MIME_TYPE)
+                val modifiedCol = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
+                while (it.moveToNext() && files.size < MAX_RECENT_FILES) {
+                    val id = it.getLong(idCol)
+                    val name = it.getString(nameCol) ?: continue
+                    val mime = it.getString(mimeCol) ?: continue
+                    files.add(
+                        RecentFile(
+                            name = name,
+                            mimeType = mime,
+                            uri = Uri.withAppendedPath(MediaStore.Files.getContentUri("external"), id.toString()),
+                            thumbnail = null,
+                            modifiedTime = it.getLong(modifiedCol),
+                        ),
+                    )
                 }
-            } catch (e: Exception) {
-                // Permission not granted or query failed — return empty
             }
-
-            _uiState.update { state -> state.copy(recentFiles = files) }
-        }
-    }
-
-    fun launchApp(appInfo: AppInfo) {
-        val intent = appInfo.launchIntent?.apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-        } ?: return
-        try {
-            context.startActivity(intent)
-        } catch (e: Exception) {
-            // App not found or launch failed
-        }
-    }
-
-    fun launchSearch(query: String) {
-        val intent = Intent(Intent.ACTION_WEB_SEARCH).apply {
-            putExtra("query", query)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }.takeIf { it.resolveActivity(context.packageManager) != null }
-            ?: Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=${Uri.encode(query)}")).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-        try {
-            context.startActivity(intent)
-        } catch (e: Exception) {
-            // No browser available
-        }
-    }
-
-    fun launchVoiceSearch() {
-        val intent = Intent("android.speech.action.VOICE_SEARCH_HANDS_FREE").apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }.takeIf { it.resolveActivity(context.packageManager) != null }
-            ?: Intent("com.google.android.googlequicksearchbox.VOICE_SEARCH_ACTION").apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-        try {
-            context.startActivity(intent)
-        } catch (e: Exception) {
-            // Voice search not available
-        }
-    }
-
-    fun launchLensSearch() {
-        val lensIntent = Intent(Intent.ACTION_VIEW).apply {
-            setPackage("com.google.ar.lens")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }.takeIf { it.resolveActivity(context.packageManager) != null }
-            ?: Intent(Intent.ACTION_VIEW, Uri.parse("intent://lens/#Intent;scheme=googlelens;end")).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-        try {
-            context.startActivity(lensIntent)
-        } catch (e: Exception) {
-            // Lens not available
-        }
-    }
-
-    fun openRecentFile(recentFile: RecentFile) {
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(recentFile.uri, recentFile.mimeType)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        try {
-            context.startActivity(intent)
-        } catch (e: Exception) {
-            // No app to handle this file type
+            _uiState.update { it.copy(recentFiles = files) }
         }
     }
 
     private companion object {
         const val MAX_RECENT_TASKS = 10
         const val MAX_RECENT_FILES = 6
-
-        /** Preferred packages for the 3 pinned dock slots, tried in order. */
         val DOCK_PACKAGE_PRIORITY = listOf(
             "com.android.chrome",
             "com.google.android.googlequicksearchbox",
@@ -331,8 +312,6 @@ class LauncherViewModel @Inject constructor(
             "com.google.android.gm",
             "com.android.vending",
         )
-
-        /** Packages considered for the AI-suggested fourth dock slot. */
         val SUGGESTED_PACKAGE_PRIORITY = listOf(
             "com.google.android.apps.maps",
             "com.google.android.youtube",
@@ -341,7 +320,6 @@ class LauncherViewModel @Inject constructor(
             "com.spotify.music",
             "com.instagram.android",
         )
-
         val RECENT_FILE_MIME_TYPES = listOf(
             "application/pdf",
             "application/msword",

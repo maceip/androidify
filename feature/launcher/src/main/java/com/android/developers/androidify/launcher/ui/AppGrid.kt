@@ -6,19 +6,19 @@
  * You may obtain a copy of the License at
  *
  *     https://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
  */
 package com.android.developers.androidify.launcher.ui
 
+import android.content.ClipData
+import android.content.ClipDescription
 import android.graphics.drawable.Drawable
+import android.os.Build
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,10 +26,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -47,24 +49,20 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.Image
 import androidx.core.graphics.drawable.toBitmap
 import com.android.developers.androidify.launcher.data.AppInfo
 
-/**
- * Grid of installed app icons shown on the home screen.
- * Uses a fixed 4-column grid matching stock Android launcher defaults.
- * Each icon supports a press-scale animation for stock-quality tactile response.
- */
 @Composable
 fun AppGrid(
     apps: List<AppInfo>,
     columns: Int = 4,
     modifier: Modifier = Modifier,
     onAppClick: (AppInfo) -> Unit = {},
+    onAppLongPress: (AppInfo) -> Unit = {},
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(columns),
@@ -73,11 +71,8 @@ fun AppGrid(
         verticalArrangement = Arrangement.spacedBy(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        items(apps, key = { it.packageName }) { app ->
-            AppIconItem(
-                app = app,
-                onClick = { onAppClick(app) },
-            )
+        items(apps, key = { "${it.packageName}:${it.className}:${it.user.hashCode()}" }) { app ->
+            AppIconItem(app = app, onClick = { onAppClick(app) }, onLongPress = { onAppLongPress(app) })
         }
     }
 }
@@ -87,44 +82,64 @@ fun AppIconItem(
     app: AppInfo,
     modifier: Modifier = Modifier,
     onClick: () -> Unit = {},
+    onLongPress: () -> Unit = {},
 ) {
     val haptic = LocalHapticFeedback.current
+    val view = LocalView.current
     var isPressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         targetValue = if (isPressed) 0.88f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessHigh,
-        ),
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessHigh),
         label = "iconPressScale",
     )
 
     Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .aspectRatio(0.8f)
-            .scale(scale)
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onPress = {
-                        isPressed = true
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        tryAwaitRelease()
-                        isPressed = false
-                    },
-                    onTap = { onClick() },
-                )
-            },
+        modifier = modifier.fillMaxWidth().aspectRatio(0.8f).scale(scale).pointerInput(Unit) {
+            detectTapGestures(
+                onPress = {
+                    isPressed = true
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    tryAwaitRelease()
+                    isPressed = false
+                },
+                onLongPress = {
+                    val clipData = ClipData(
+                        app.packageName,
+                        arrayOf(ClipDescription.MIMETYPE_TEXT_PLAIN),
+                        ClipData.Item(app.packageName),
+                    )
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        view.startDragAndDrop(clipData, android.view.View.DragShadowBuilder(view), app, 0)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        view.startDrag(clipData, android.view.View.DragShadowBuilder(view), app, 0)
+                    }
+                    onLongPress()
+                },
+                onTap = { onClick() },
+            )
+        },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        AppIconImage(
-            drawable = app.icon,
-            contentDescription = app.label,
-            modifier = Modifier
-                .size(52.dp)
-                .clip(RoundedCornerShape(14.dp)),
-        )
+        Box {
+            AppIconImage(
+                drawable = app.icon,
+                contentDescription = app.label,
+                modifier = Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)),
+            )
+            if (app.notificationCount > 0) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 4.dp, y = (-4).dp)
+                        .size(16.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFD50000))
+                        .border(1.dp, Color.White, CircleShape),
+                )
+            }
+        }
         Text(
             text = app.label,
             style = MaterialTheme.typography.labelSmall,
@@ -137,23 +152,11 @@ fun AppIconItem(
     }
 }
 
-/**
- * Renders a [Drawable] as a Compose [Image], converting via bitmap.
- * Falls back to a placeholder box if the drawable is null.
- */
 @Composable
-fun AppIconImage(
-    drawable: Drawable?,
-    contentDescription: String?,
-    modifier: Modifier = Modifier,
-) {
+fun AppIconImage(drawable: Drawable?, contentDescription: String?, modifier: Modifier = Modifier) {
     if (drawable != null) {
         val bitmap = remember(drawable) { drawable.toBitmap() }
-        Image(
-            bitmap = bitmap.asImageBitmap(),
-            contentDescription = contentDescription,
-            modifier = modifier,
-        )
+        Image(bitmap = bitmap.asImageBitmap(), contentDescription = contentDescription, modifier = modifier)
     } else {
         Box(modifier = modifier)
     }
