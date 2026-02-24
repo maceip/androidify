@@ -15,6 +15,7 @@
  */
 package com.android.developers.androidify.launcher.ui
 
+import android.annotation.SuppressLint
 import android.app.WallpaperManager
 import android.graphics.drawable.Drawable
 import androidx.compose.foundation.Image
@@ -36,6 +37,7 @@ import androidx.core.graphics.drawable.toBitmap
  * Renders the device wallpaper as the launcher background with a subtle dark scrim overlay
  * to ensure app icons and widgets are legible against any wallpaper color.
  */
+@SuppressLint("MissingPermission")
 @Composable
 fun WallpaperBackground(modifier: Modifier = Modifier) {
     val context = LocalContext.current
