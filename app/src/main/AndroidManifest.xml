@@ -26,6 +26,10 @@
     <uses-permission android:name="android.permission.BIND_APPWIDGET" />
     <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- [B] Notes Role: PACKAGE_USAGE_STATS for ID Access Gate (Settings > Usage Access) -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission
@@ -46,6 +50,7 @@
     <application
         android:name=".AndroidifyApplication"
         android:allowBackup="true"
+        android:largeHeap="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:enableOnBackInvokedCallback="true"
         android:fullBackupContent="@xml/backup_rules"
@@ -116,6 +121,11 @@
                 <action android:name="android.intent.action.SET_WALLPAPER" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+            <!-- [B] Notes Role: CREATE_NOTE intent for lock-screen note capture -->
+            <intent-filter>
+                <action android:name="android.intent.action.CREATE_NOTE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
             <!-- Required deeplink to make the app launchable from the watch -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -146,6 +156,15 @@
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- [B] Notes Role service stub — keeps process warm via oom_score_adj -->
+        <service
+            android:name=".AssistantNotesService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.CREATE_NOTE" />
             </intent-filter>
         </service>
 

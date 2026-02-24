@@ -59,7 +59,24 @@ jobs:
           fi
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --no-configuration-cache
+        run: |
+          set +e
+          ./gradlew assembleDebug --no-configuration-cache --stacktrace 2>&1 | tee /tmp/build.log
+          BUILD_RC=${PIPESTATUS[0]}
+          if [ $BUILD_RC -ne 0 ]; then
+            # Extract error lines and emit as GitHub annotations
+            grep -i "error:" /tmp/build.log | head -20 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            # Also write last 80 lines to summary
+            {
+              echo "## Build Failed"
+              echo '```'
+              tail -80 /tmp/build.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit $BUILD_RC
 
       - name: Get APK path and build info
         id: apk_info

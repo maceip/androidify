@@ -28,6 +28,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import com.android.developers.androidify.launcher.platform.ContextEngine
+import com.android.developers.androidify.launcher.platform.MediaServiceConnection
+import com.android.developers.androidify.launcher.platform.MomentumBridge
+import com.android.developers.androidify.launcher.platform.UsageGatekeeper
 import com.android.developers.androidify.navigation.MainNavigation
 import com.android.developers.androidify.theme.AndroidifyTheme
 import com.android.developers.androidify.util.LocalOcclusion
@@ -43,8 +47,13 @@ class MainActivity : ComponentActivity() {
         isWindowOccluded.value = !isMinFractionRendered
     }
 
+    /** [F] Media Browser connection for At-a-Glance now-playing data. */
+    private var mediaServiceConnection: MediaServiceConnection? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        registerNavigationObserver()
+        mediaServiceConnection = MediaServiceConnection(this)
 
         setContent {
             AndroidifyTheme {
@@ -61,6 +70,69 @@ class MainActivity : ComponentActivity() {
                 CompositionLocalProvider(LocalOcclusion provides isWindowOccluded) {
                     MainNavigation()
                 }
+            }
+        }
+    }
+
+    /**
+     * [A] Inject synthetic velocity on every resume so spring animations have
+     * kinetic continuity even when the system gesture gave us zero touch data.
+     * [C] Query the ID Access Gate for the app the user just left.
+     * [F] Refresh media session metadata for At-a-Glance.
+     */
+    override fun onResume() {
+        super.onResume()
+        MomentumBridge.inject(-3000f)
+        UsageGatekeeper.getTopPackage(this)
+        mediaServiceConnection?.connectToActiveSession()
+    }
+
+    /**
+     * [G] onUserLeaveHint — Universal fallback for home detection.
+     * Fires right before the app goes to background due to Home press or swipe-up.
+     */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        ContextEngine.updateVelocity(MomentumBridge.initialVelocity.floatValue)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        mediaServiceConnection?.disconnect()
+    }
+
+    /**
+     * [G] Navigation Observer — On Android 16+, PRIORITY_SYSTEM_NAVIGATION_OBSERVER
+     * fires when the system detects a back-to-home gesture, before the transition
+     * completes. This is the "starting gun" for the Velocity Buffer, allowing us
+     * to inject a higher synthetic velocity earlier in the animation pipeline.
+     */
+    /**
+     * Register the navigation observer via reflection to avoid compile-time dependency
+     * on specific API level constants. On Android 16+, this callback fires when the
+     * system detects a back-to-home gesture, before the transition completes.
+     */
+    private fun registerNavigationObserver() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            try {
+                val callbackClass = Class.forName("android.window.OnBackInvokedCallback")
+                val proxy = java.lang.reflect.Proxy.newProxyInstance(
+                    callbackClass.classLoader,
+                    arrayOf(callbackClass),
+                ) { _, _, _ ->
+                    MomentumBridge.inject(-3500f)
+                    null
+                }
+                // PRIORITY_SYSTEM_NAVIGATION_OBSERVER = 0 (API 36+)
+                val dispatcher = onBackInvokedDispatcher
+                val method = dispatcher.javaClass.getMethod(
+                    "registerOnBackInvokedCallback",
+                    Int::class.javaPrimitiveType,
+                    callbackClass,
+                )
+                method.invoke(dispatcher, 0, proxy)
+            } catch (_: Exception) {
+                // Reflection may fail on older APIs or custom OEM implementations
             }
         }
     }
