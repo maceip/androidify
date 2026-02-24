@@ -65,23 +65,39 @@ jobs:
         if: always()
         run: |
           if [ -f /tmp/build.log ]; then
+            # Extract Kotlin compiler error lines (e: file:line: message)
+            echo "::group::Kotlin Compiler Errors"
+            grep -n "^e: " /tmp/build.log | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            echo "::endgroup::"
+
+            # Extract lines with common error patterns
+            echo "::group::Error Patterns"
+            grep -in "Unresolved reference\|Cannot find symbol\|not found\|Type mismatch\|None of the following\|overload resolution ambiguity" /tmp/build.log | head -30 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            echo "::endgroup::"
+
             if grep -q "BUILD FAILED\|BUILD SUCCESSFUL" /tmp/build.log; then
               if grep -q "BUILD FAILED" /tmp/build.log; then
-                echo "::error::Build failed. Dumping last 40 lines:"
-                tail -40 /tmp/build.log | while IFS= read -r line; do
-                  echo "::error::$line"
-                done
+                echo "::error::BUILD FAILED"
                 {
-                  echo "## Build Failed"
+                  echo "## Kotlin Compiler Errors"
                   echo '```'
-                  tail -120 /tmp/build.log
+                  grep "^e: " /tmp/build.log || echo "No e: lines found"
+                  echo '```'
+                  echo ""
+                  echo "## Last 200 lines of build log"
+                  echo '```'
+                  tail -200 /tmp/build.log
                   echo '```'
                 } >> "$GITHUB_STEP_SUMMARY"
                 exit 1
               fi
             else
-              echo "::error::Build log exists but no BUILD FAILED/SUCCESSFUL found. Last 40 lines:"
-              tail -40 /tmp/build.log | while IFS= read -r line; do
+              echo "::error::Build log exists but no BUILD FAILED/SUCCESSFUL found."
+              tail -60 /tmp/build.log | while IFS= read -r line; do
                 echo "::error::$line"
               done
               exit 1
