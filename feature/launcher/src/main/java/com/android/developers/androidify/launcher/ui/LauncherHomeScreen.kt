@@ -28,6 +28,7 @@ import androidx.compose.foundation.gestures.AnchoredDraggableState
 import androidx.compose.foundation.gestures.DraggableAnchors
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.anchoredDraggable
+import androidx.compose.foundation.gestures.animateTo
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -98,7 +99,6 @@ fun LauncherHomeScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val density = LocalDensity.current
-    val decaySpec = rememberSplineBasedDecay<Float>()
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
     var currentFace by remember { mutableStateOf(LauncherFace.Home) }
@@ -114,13 +114,6 @@ fun LauncherHomeScreen(
     val drawerState = remember {
         AnchoredDraggableState(
             initialValue = DrawerValue.Collapsed,
-            positionalThreshold = { totalDistance -> totalDistance * 0.4f },
-            velocityThreshold = { with(density) { 100.dp.toPx() } },
-            snapAnimationSpec = spring(
-                dampingRatio = Spring.DampingRatioMediumBouncy,
-                stiffness = Spring.StiffnessMedium,
-            ),
-            decayAnimationSpec = decaySpec,
         )
     }
 
@@ -491,6 +484,7 @@ private fun PhoneLauncherLayout(
             onSearch = onSearch,
             onVoiceSearch = onVoiceSearch,
             onLensSearch = onLensSearch,
+            onWidgetAction = {},
         )
     }
 }
