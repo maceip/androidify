@@ -22,7 +22,7 @@ import androidx.compose.foundation.gestures.AnchoredDraggableState
 import androidx.compose.foundation.gestures.DraggableAnchors
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.anchoredDraggable
-import androidx.compose.foundation.gestures.snapTo
+import androidx.compose.foundation.gestures.animateTo
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -107,7 +107,7 @@ fun LauncherHomeScreen(
                 drawerState = drawerState,
                 onAppClick = { app ->
                     viewModel.launchApp(app)
-                    scope.launch { drawerState.snapTo(DrawerValue.Collapsed) }
+                    scope.launch { drawerState.animateTo(DrawerValue.Collapsed) }
                 },
                 onSearch = viewModel::launchSearch,
                 onVoiceSearch = viewModel::launchVoiceSearch,
@@ -120,7 +120,7 @@ fun LauncherHomeScreen(
                 drawerState = drawerState,
                 onAppClick = { app ->
                     viewModel.launchApp(app)
-                    scope.launch { drawerState.snapTo(DrawerValue.Collapsed) }
+                    scope.launch { drawerState.animateTo(DrawerValue.Collapsed) }
                 },
                 onSearch = viewModel::launchSearch,
                 onVoiceSearch = viewModel::launchVoiceSearch,
@@ -135,10 +135,10 @@ fun LauncherHomeScreen(
             layoutType = layoutType,
             drawerState = drawerState,
             screenHeightPx = screenHeightPx,
-            onDismiss = { scope.launch { drawerState.snapTo(DrawerValue.Collapsed) } },
+            onDismiss = { scope.launch { drawerState.animateTo(DrawerValue.Collapsed) } },
             onAppClick = { app ->
                 viewModel.launchApp(app)
-                scope.launch { drawerState.snapTo(DrawerValue.Collapsed) }
+                scope.launch { drawerState.animateTo(DrawerValue.Collapsed) }
             },
             onTaskClick = { task ->
                 viewModel.launchApp(
@@ -149,12 +149,12 @@ fun LauncherHomeScreen(
                         launchIntent = null,
                     ),
                 )
-                scope.launch { drawerState.snapTo(DrawerValue.Collapsed) }
+                scope.launch { drawerState.animateTo(DrawerValue.Collapsed) }
             },
             onSearchQueryChange = viewModel::updateSearchQuery,
             onSearchSubmit = { query ->
                 viewModel.launchSearch(query)
-                scope.launch { drawerState.snapTo(DrawerValue.Collapsed) }
+                scope.launch { drawerState.animateTo(DrawerValue.Collapsed) }
             },
         )
     }

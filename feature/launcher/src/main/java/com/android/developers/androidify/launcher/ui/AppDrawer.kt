@@ -182,7 +182,8 @@ private fun PhoneAppDrawer(
 
             override suspend fun onPreFling(available: Velocity): Velocity {
                 return if (available.y > 0f && drawerState.currentValue != DrawerValue.Collapsed) {
-                    drawerState.settle()
+                    @Suppress("DEPRECATION")
+                    drawerState.settle(available.y)
                     available
                 } else {
                     Velocity.Zero
@@ -296,7 +297,8 @@ fun FoldableAppDrawer(
 
             override suspend fun onPreFling(available: Velocity): Velocity {
                 return if (available.y > 0f && drawerState.currentValue != DrawerValue.Collapsed) {
-                    drawerState.settle()
+                    @Suppress("DEPRECATION")
+                    drawerState.settle(available.y)
                     available
                 } else {
                     Velocity.Zero
