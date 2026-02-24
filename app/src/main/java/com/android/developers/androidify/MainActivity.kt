@@ -18,7 +18,6 @@ package com.android.developers.androidify
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
-import android.window.OnBackInvokedCallback
 import android.window.TrustedPresentationThresholds
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -108,19 +107,32 @@ class MainActivity : ComponentActivity() {
      * completes. This is the "starting gun" for the Velocity Buffer, allowing us
      * to inject a higher synthetic velocity earlier in the animation pipeline.
      */
-    @Suppress("PrivateApi")
+    /**
+     * Register the navigation observer via reflection to avoid compile-time dependency
+     * on specific API level constants. On Android 16+, this callback fires when the
+     * system detects a back-to-home gesture, before the transition completes.
+     */
     private fun registerNavigationObserver() {
-        if (Build.VERSION.SDK_INT >= 36) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             try {
-                // PRIORITY_SYSTEM_NAVIGATION_OBSERVER is API 36+.
-                // Use the raw int value (0) to avoid compile-time dependency on SDK 36.
-                val priorityNavObserver = 0
-                onBackInvokedDispatcher.registerOnBackInvokedCallback(
-                    priorityNavObserver,
-                    OnBackInvokedCallback { MomentumBridge.inject(-3500f) },
+                val callbackClass = Class.forName("android.window.OnBackInvokedCallback")
+                val proxy = java.lang.reflect.Proxy.newProxyInstance(
+                    callbackClass.classLoader,
+                    arrayOf(callbackClass),
+                ) { _, _, _ ->
+                    MomentumBridge.inject(-3500f)
+                    null
+                }
+                // PRIORITY_SYSTEM_NAVIGATION_OBSERVER = 0 (API 36+)
+                val dispatcher = onBackInvokedDispatcher
+                val method = dispatcher.javaClass.getMethod(
+                    "registerOnBackInvokedCallback",
+                    Int::class.javaPrimitiveType,
+                    callbackClass,
                 )
+                method.invoke(dispatcher, 0, proxy)
             } catch (_: Exception) {
-                // PRIORITY_SYSTEM_NAVIGATION_OBSERVER may not be available on all devices
+                // Reflection may fail on older APIs or custom OEM implementations
             }
         }
     }
