@@ -144,12 +144,6 @@ class LauncherAppsRepository @Inject constructor(
         launcherApps.pinShortcuts(packageName, ids, user)
     }
 
-
-    fun getAppUsageLimit(packageName: String, user: UserHandle): LauncherApps.AppUsageLimit? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
-        return launcherApps.getAppUsageLimit(packageName, user)
-    }
-
     fun shouldHideFromSuggestions(packageName: String, user: UserHandle): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
         return launcherApps.shouldHideFromSuggestions(packageName, user)

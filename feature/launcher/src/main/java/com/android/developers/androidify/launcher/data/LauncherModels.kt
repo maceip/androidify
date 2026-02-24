@@ -43,7 +43,7 @@ data class LauncherShortcut(
 
 fun ShortcutInfo.toLauncherShortcut() = LauncherShortcut(
     id = id,
-    shortLabel = shortLabel,
+    shortLabel = shortLabel ?: "",
     longLabel = longLabel,
     packageName = `package`,
     user = userHandle,
