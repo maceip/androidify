@@ -45,11 +45,17 @@ jobs:
           DEBUG_GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.DEBUG_GOOGLE_SERVICES_JSON_BASE64 }}
         run: |
           if [ -z "$DEBUG_GOOGLE_SERVICES_JSON_BASE64" ]; then
-            echo "DEBUG_GOOGLE_SERVICES_JSON_BASE64 is empty. Copying test-google-services.json."
-            cp test-google-services.json app/google-services.json
+            echo "No secret set. Generating placeholder google-services.json for CI."
+            cat > app/google-services.json << 'GSEOF'
+          {
+            "project_info": { "project_number": "000000000000", "project_id": "placeholder", "storage_bucket": "placeholder.appspot.com" },
+            "client": [{ "client_info": { "mobilesdk_app_id": "1:000000000000:android:0000000000000000", "android_client_info": { "package_name": "com.android.developers.androidify" } }, "oauth_client": [], "api_key": [{ "current_key": "AIzaSyPlaceholderKeyForCIBuilds000000" }], "services": { "appinvite_service": { "other_platform_oauth_client": [] } } }],
+            "configuration_version": "1"
+          }
+          GSEOF
           else
             echo "Decoding DEBUG_GOOGLE_SERVICES_JSON_BASE64."
-            echo $DEBUG_GOOGLE_SERVICES_JSON_BASE64 | base64 --decode > app/google-services.json
+            echo "$DEBUG_GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > app/google-services.json
           fi
 
       - name: Build debug APK
