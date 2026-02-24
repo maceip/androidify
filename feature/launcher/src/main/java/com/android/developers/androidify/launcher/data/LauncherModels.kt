@@ -16,14 +16,38 @@
 package com.android.developers.androidify.launcher.data
 
 import android.content.Intent
+import android.content.pm.ShortcutInfo
 import android.graphics.drawable.Drawable
+import android.os.UserHandle
 
 /** Represents an installed application on the device. */
 data class AppInfo(
     val packageName: String,
+    val className: String,
     val label: String,
     val icon: Drawable?,
     val launchIntent: Intent?,
+    val user: UserHandle,
+    val isWorkProfile: Boolean = false,
+    val notificationCount: Int = 0,
+)
+
+data class LauncherShortcut(
+    val id: String,
+    val shortLabel: CharSequence,
+    val longLabel: CharSequence?,
+    val packageName: String,
+    val user: UserHandle,
+    val rank: Int,
+)
+
+fun ShortcutInfo.toLauncherShortcut() = LauncherShortcut(
+    id = id,
+    shortLabel = shortLabel,
+    longLabel = longLabel,
+    packageName = `package`,
+    user = userHandle,
+    rank = rank,
 )
 
 /** Represents a recently used task (running app) for the recents panel. */
