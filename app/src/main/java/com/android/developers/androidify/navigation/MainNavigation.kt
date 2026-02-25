@@ -45,6 +45,7 @@ import com.android.developers.androidify.customize.CustomizeAndExportScreen
 import com.android.developers.androidify.customize.CustomizeExportViewModel
 import com.android.developers.androidify.home.AboutScreen
 import com.android.developers.androidify.home.HomeScreen
+import com.android.developers.androidify.launcher.LauncherViewModel
 import com.android.developers.androidify.launcher.data.LauncherLayoutType
 import com.android.developers.androidify.launcher.ui.LauncherHomeScreen
 import com.android.developers.androidify.results.ResultsScreen
@@ -94,8 +95,10 @@ fun MainNavigation() {
                 } else {
                     LauncherLayoutType.Phone
                 }
+                val launcherViewModel = hiltViewModel<LauncherViewModel>()
                 LauncherHomeScreen(
                     layoutType = launcherLayoutType,
+                    viewModel = launcherViewModel,
                 )
             }
             entry<Home> { entry ->
