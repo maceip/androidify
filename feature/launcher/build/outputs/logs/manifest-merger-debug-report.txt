@@ -1,0 +1,16 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /home/pooppoop/aosp/androidify/feature/launcher/src/main/AndroidManifest.xml:17:1-18:12
+INJECTED from /home/pooppoop/aosp/androidify/feature/launcher/src/main/AndroidManifest.xml:17:1-18:12
+	package
+		INJECTED from /home/pooppoop/aosp/androidify/feature/launcher/src/main/AndroidManifest.xml
+	xmlns:android
+		ADDED from /home/pooppoop/aosp/androidify/feature/launcher/src/main/AndroidManifest.xml:17:11-69
+uses-sdk
+INJECTED from /home/pooppoop/aosp/androidify/feature/launcher/src/main/AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from /home/pooppoop/aosp/androidify/feature/launcher/src/main/AndroidManifest.xml
+INJECTED from /home/pooppoop/aosp/androidify/feature/launcher/src/main/AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from /home/pooppoop/aosp/androidify/feature/launcher/src/main/AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from /home/pooppoop/aosp/androidify/feature/launcher/src/main/AndroidManifest.xml

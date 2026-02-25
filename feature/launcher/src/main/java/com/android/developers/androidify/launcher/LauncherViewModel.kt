@@ -16,6 +16,7 @@
 package com.android.developers.androidify.launcher
 
 import android.app.ActivityManager
+import android.app.usage.UsageStatsManager
 import android.appwidget.AppWidgetProviderInfo
 import android.content.Context
 import android.content.Intent
@@ -144,7 +145,40 @@ class LauncherViewModel @Inject constructor(
         }
     }
 
+    fun removeWidget(widgetId: Int) {
+        viewModelScope.launch {
+            launcherLayoutStore.removePinnedWidgetId(widgetId)
+        }
+    }
+
     fun launchWallpaperPicker() {
+        // Try to launch the Google "Wallpaper & style" app directly to avoid
+        // the system chooser bottom sheet.
+        val directIntents = listOf(
+            // Google Wallpaper & style (Pixel)
+            Intent().apply {
+                component = android.content.ComponentName(
+                    "com.google.android.apps.wallpaper",
+                    "com.google.android.apps.wallpaper.picker.CategoryPickerActivity",
+                )
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            },
+            // Fallback: launch the wallpaper app's main activity
+            context.packageManager.getLaunchIntentForPackage("com.google.android.apps.wallpaper")?.apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            },
+        )
+        for (intent in directIntents) {
+            if (intent != null) {
+                try {
+                    context.startActivity(intent)
+                    return
+                } catch (_: Exception) {
+                    // Component not found, try next
+                }
+            }
+        }
+        // Final fallback: generic SET_WALLPAPER (will show chooser)
         val wallpaperIntent = Intent(Intent.ACTION_SET_WALLPAPER).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
@@ -229,28 +263,82 @@ class LauncherViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Load recently used apps via [UsageStatsManager] — works reliably for
+     * launchers with the PACKAGE_USAGE_STATS permission (granted via Settings).
+     * Falls back to the deprecated [ActivityManager.getRecentTasks] if usage
+     * stats aren't available.
+     */
     @Suppress("DEPRECATION")
     private fun loadRecentTasks() {
         viewModelScope.launch(Dispatchers.IO) {
-            val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             val pm = context.packageManager
-            val tasks = try {
-                activityManager.getRecentTasks(MAX_RECENT_TASKS, ActivityManager.RECENT_IGNORE_UNAVAILABLE)
-                    .mapNotNull { recentTaskInfo ->
-                        val packageName = recentTaskInfo.baseIntent?.component?.packageName ?: return@mapNotNull null
-                        val app = _uiState.value.allApps.find { it.packageName == packageName }
-                        RecentTask(
-                            id = recentTaskInfo.id,
-                            label = app?.label ?: packageName,
-                            packageName = packageName,
-                            icon = app?.icon ?: pm.getApplicationIcon(packageName),
-                            thumbnail = null,
-                        )
-                    }
-            } catch (_: Exception) {
-                emptyList()
-            }
+            val tasks = loadViaUsageStats(pm) ?: loadViaActivityManager(pm)
             _uiState.update { it.copy(recentTasks = tasks) }
+        }
+    }
+
+    private fun loadViaUsageStats(pm: android.content.pm.PackageManager): List<RecentTask>? {
+        return try {
+            val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
+                ?: return null
+            val endTime = System.currentTimeMillis()
+            val startTime = endTime - 24 * 60 * 60 * 1000 // Last 24 hours
+            val stats = usageStatsManager.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY, startTime, endTime,
+            )
+            if (stats.isNullOrEmpty()) return null
+
+            val ownPackage = context.packageName
+            val allApps = _uiState.value.allApps
+
+            stats
+                .filter { it.totalTimeInForeground > 0 && it.packageName != ownPackage }
+                .sortedByDescending { it.lastTimeUsed }
+                .distinctBy { it.packageName }
+                .take(MAX_RECENT_TASKS)
+                .mapNotNull { stat ->
+                    val app = allApps.find { it.packageName == stat.packageName }
+                    val icon = app?.icon ?: try {
+                        pm.getApplicationIcon(stat.packageName)
+                    } catch (_: Exception) {
+                        null
+                    }
+                    val label = app?.label ?: try {
+                        pm.getApplicationLabel(pm.getApplicationInfo(stat.packageName, 0)).toString()
+                    } catch (_: Exception) {
+                        return@mapNotNull null
+                    }
+                    RecentTask(
+                        id = stat.packageName.hashCode(),
+                        label = label,
+                        packageName = stat.packageName,
+                        icon = icon,
+                        thumbnail = null,
+                    )
+                }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun loadViaActivityManager(pm: android.content.pm.PackageManager): List<RecentTask> {
+        return try {
+            val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            activityManager.getRecentTasks(MAX_RECENT_TASKS, ActivityManager.RECENT_IGNORE_UNAVAILABLE)
+                .mapNotNull { recentTaskInfo ->
+                    val packageName = recentTaskInfo.baseIntent?.component?.packageName ?: return@mapNotNull null
+                    val app = _uiState.value.allApps.find { it.packageName == packageName }
+                    RecentTask(
+                        id = recentTaskInfo.id,
+                        label = app?.label ?: packageName,
+                        packageName = packageName,
+                        icon = app?.icon ?: pm.getApplicationIcon(packageName),
+                        thumbnail = null,
+                    )
+                }
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 

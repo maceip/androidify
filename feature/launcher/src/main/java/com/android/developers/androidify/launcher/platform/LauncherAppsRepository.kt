@@ -1,12 +1,18 @@
 package com.android.developers.androidify.launcher.platform
 
+import android.app.WallpaperManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.LauncherApps
 import android.content.pm.LauncherApps.ShortcutQuery
 import android.content.res.Resources
+import android.graphics.BlendMode
+import android.graphics.BlendModeColorFilter
 import android.graphics.drawable.AdaptiveIconDrawable
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.InsetDrawable
+import android.graphics.drawable.LayerDrawable
 import android.os.Build
 import android.os.Process
 import android.os.UserHandle
@@ -45,6 +51,15 @@ class LauncherAppsRepository @Inject constructor(
     init {
         launcherApps.registerCallback(callback)
         reloadApps()
+        // Reload icons when wallpaper colors change so themed tints update
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                WallpaperManager.getInstance(context).addOnColorsChangedListener(
+                    { _, _ -> reloadApps() },
+                    android.os.Handler(android.os.Looper.getMainLooper()),
+                )
+            } catch (_: Exception) { }
+        }
     }
 
 
@@ -73,10 +88,13 @@ class LauncherAppsRepository @Inject constructor(
     }
 
     /**
-     * Attempts to load the themed/monochrome icon for the given activity on
-     * Android 13+ (API 33). If the app declares a `<monochrome>` layer in its
-     * adaptive-icon, this will return the system-tinted monochrome variant.
-     * Falls back to the standard icon if theming is unavailable or on older APIs.
+     * Loads the icon for an activity. On API 33+, if the icon declares a
+     * monochrome layer, extracts it and tints it with wallpaper-derived colors
+     * to match the Material You "themed icons" feature from Pixel Launcher.
+     *
+     * The tinting logic:
+     *  - Background: a light/pastel version of the wallpaper primary color
+     *  - Foreground: the monochrome alpha mask tinted with the wallpaper primary color
      */
     private fun loadThemedIconOrFallback(
         info: android.content.pm.LauncherActivityInfo,
@@ -86,12 +104,9 @@ class LauncherAppsRepository @Inject constructor(
             try {
                 val icon = info.getIcon(displayDensity)
                 if (icon is AdaptiveIconDrawable) {
-                    val monochrome = icon.monochrome
-                    if (monochrome != null) {
-                        // System will handle tinting the monochrome layer to the
-                        // wallpaper's primary color. Return the full adaptive icon
-                        // which the system renders with the themed treatment.
-                        return icon
+                    val mono = icon.monochrome
+                    if (mono != null) {
+                        return createThemedIcon(mono) ?: icon
                     }
                 }
                 return icon
@@ -100,6 +115,56 @@ class LauncherAppsRepository @Inject constructor(
             }
         }
         return info.getIcon(0)
+    }
+
+    /**
+     * Creates a themed icon by tinting [monoDrawable] with wallpaper colors.
+     * Returns an [AdaptiveIconDrawable] with colored background + tinted mono foreground,
+     * or null if wallpaper colors aren't available.
+     */
+    private fun createThemedIcon(monoDrawable: Drawable): Drawable? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
+
+        val colors = try {
+            WallpaperManager.getInstance(context).getWallpaperColors(WallpaperManager.FLAG_SYSTEM)
+        } catch (_: Exception) {
+            null
+        } ?: return null
+
+        val primary = colors.primaryColor.toArgb()
+
+        // Derive background: lighten the primary color significantly for the
+        // pastel background that Pixel Launcher uses behind monochrome icons.
+        val bgColor = blendWithWhite(primary, 0.78f)
+        // Foreground tint: the primary color itself (dark on light bg).
+        val fgColor = darken(primary, 0.6f)
+
+        // Tint the monochrome drawable
+        val tintedMono = monoDrawable.mutate().apply {
+            colorFilter = BlendModeColorFilter(fgColor, BlendMode.SRC_IN)
+        }
+
+        // Wrap in an AdaptiveIconDrawable shape: colored bg + tinted mono fg
+        return AdaptiveIconDrawable(
+            ColorDrawable(bgColor),
+            InsetDrawable(tintedMono, 0.1f),
+        )
+    }
+
+    /** Blend [color] toward white by [ratio] (0 = original, 1 = white). */
+    private fun blendWithWhite(color: Int, ratio: Float): Int {
+        val r = ((color shr 16 and 0xFF) + ((255 - (color shr 16 and 0xFF)) * ratio)).toInt().coerceIn(0, 255)
+        val g = ((color shr 8 and 0xFF) + ((255 - (color shr 8 and 0xFF)) * ratio)).toInt().coerceIn(0, 255)
+        val b = ((color and 0xFF) + ((255 - (color and 0xFF)) * ratio)).toInt().coerceIn(0, 255)
+        return (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+    }
+
+    /** Darken [color] by [factor] (0 = black, 1 = original). */
+    private fun darken(color: Int, factor: Float): Int {
+        val r = ((color shr 16 and 0xFF) * factor).toInt().coerceIn(0, 255)
+        val g = ((color shr 8 and 0xFF) * factor).toInt().coerceIn(0, 255)
+        val b = ((color and 0xFF) * factor).toInt().coerceIn(0, 255)
+        return (0xFF shl 24) or (r shl 16) or (g shl 8) or b
     }
 
     fun launchMainActivity(appInfo: AppInfo) {
@@ -116,36 +181,54 @@ class LauncherAppsRepository @Inject constructor(
     }
 
     fun getShortcuts(packageName: String): List<LauncherShortcut> {
-        val profiles = getProfiles()
-        return profiles.flatMap { user ->
-            val query = ShortcutQuery().apply {
-                setPackage(packageName)
-                setQueryFlags(
-                    ShortcutQuery.FLAG_MATCH_DYNAMIC or
-                        ShortcutQuery.FLAG_MATCH_MANIFEST or
-                        ShortcutQuery.FLAG_MATCH_PINNED,
-                )
-            }
-            launcherApps.getShortcuts(query, user).orEmpty().map { it.toLauncherShortcut() }
-        }.sortedBy { it.rank }
+        // Shortcut access requires being the default launcher. If the user hasn't
+        // set us as default yet, the system throws SecurityException.
+        return try {
+            val profiles = getProfiles()
+            profiles.flatMap { user ->
+                val query = ShortcutQuery().apply {
+                    setPackage(packageName)
+                    setQueryFlags(
+                        ShortcutQuery.FLAG_MATCH_DYNAMIC or
+                            ShortcutQuery.FLAG_MATCH_MANIFEST or
+                            ShortcutQuery.FLAG_MATCH_PINNED,
+                    )
+                }
+                launcherApps.getShortcuts(query, user).orEmpty().map { it.toLauncherShortcut() }
+            }.sortedBy { it.rank }
+        } catch (_: SecurityException) {
+            emptyList()
+        }
     }
 
     fun startShortcut(shortcut: LauncherShortcut) {
-        launcherApps.startShortcut(
-            shortcut.packageName,
-            shortcut.id,
-            null,
-            null,
-            shortcut.user,
-        )
+        try {
+            launcherApps.startShortcut(
+                shortcut.packageName,
+                shortcut.id,
+                null,
+                null,
+                shortcut.user,
+            )
+        } catch (_: SecurityException) {
+            // Not the default launcher — shortcut access denied
+        }
     }
 
     fun pinShortcuts(packageName: String, user: UserHandle, ids: List<String>) {
-        launcherApps.pinShortcuts(packageName, ids, user)
+        try {
+            launcherApps.pinShortcuts(packageName, ids, user)
+        } catch (_: SecurityException) {
+            // Not the default launcher
+        }
     }
 
     fun shouldHideFromSuggestions(packageName: String, user: UserHandle): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
-        return launcherApps.shouldHideFromSuggestions(packageName, user)
+        return try {
+            launcherApps.shouldHideFromSuggestions(packageName, user)
+        } catch (_: SecurityException) {
+            false
+        }
     }
 }

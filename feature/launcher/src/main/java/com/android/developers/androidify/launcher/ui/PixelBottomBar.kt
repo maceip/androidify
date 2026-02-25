@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -45,6 +46,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Cast
 import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -112,6 +114,7 @@ fun PixelBottomBar(
     onWidgetAction: (WidgetContextAction) -> Unit,
     modifier: Modifier = Modifier,
     expanded: Boolean = true,
+    onSearchBarLongPress: () -> Unit = {},
 ) {
     // Staggered reveal animatables: search bar -> dock row -> AI bar
     val searchBarReveal = remember { Animatable(0f) }
@@ -240,6 +243,7 @@ fun PixelBottomBar(
             onSearch = onSearch,
             onVoiceSearch = onVoiceSearch,
             onLensSearch = onLensSearch,
+            onLongPress = onSearchBarLongPress,
             modifier = Modifier
                 .fillMaxWidth()
                 .graphicsLayer {
@@ -525,23 +529,35 @@ private fun GoogleSearchBar(
     onSearch: (String) -> Unit,
     onVoiceSearch: () -> Unit,
     onLensSearch: () -> Unit,
+    onLongPress: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        modifier = modifier
-            .height(56.dp)
-            .pointerInput(Unit) {
-                detectTapGestures(onTap = { onSearch("") })
-            }
-            .semantics {
-                contentDescription = "Google Search"
-                role = Role.Button
-            },
-        shape = RoundedCornerShape(50),
-        color = Color.White.copy(alpha = 0.93f),
-        shadowElevation = 4.dp,
-        tonalElevation = 0.dp,
-    ) {
+    val haptic = LocalHapticFeedback.current
+    var showTooltip by remember { mutableStateOf(false) }
+
+    Box(modifier = modifier, contentAlignment = Alignment.BottomCenter) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { onSearch("") },
+                        onLongPress = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            showTooltip = true
+                        },
+                    )
+                }
+                .semantics {
+                    contentDescription = "Google Search"
+                    role = Role.Button
+                },
+            shape = RoundedCornerShape(50),
+            color = Color.White.copy(alpha = 0.93f),
+            shadowElevation = 4.dp,
+            tonalElevation = 0.dp,
+        ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -595,6 +611,78 @@ private fun GoogleSearchBar(
                 LensIcon(
                     tint = GoogleBlue,
                     modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+    }
+
+        // "Widget settings" tooltip — rendered above the search bar
+        if (showTooltip) {
+            WidgetSettingsTooltip(
+                onDismiss = { showTooltip = false },
+                onSettings = {
+                    showTooltip = false
+                    onLongPress()
+                },
+            )
+        }
+    } // Box
+}
+
+/**
+ * "Widget settings" tooltip shown above the search bar on long press.
+ * Matches Pixel Launcher's dark rounded pill with a gear icon.
+ */
+@Composable
+private fun WidgetSettingsTooltip(
+    onDismiss: () -> Unit,
+    onSettings: () -> Unit,
+) {
+    val scale by animateFloatAsState(
+        targetValue = 1f,
+        animationSpec = spring(
+            dampingRatio = 0.7f,
+            stiffness = Spring.StiffnessMedium,
+        ),
+        label = "tooltipScale",
+    )
+
+    // Positioned above the search bar
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .offset(y = (-64).dp)
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.Center,
+    ) {
+        Surface(
+            modifier = Modifier
+                .graphicsLayer {
+                    scaleX = 0.8f + 0.2f * scale
+                    scaleY = 0.8f + 0.2f * scale
+                    alpha = scale
+                    transformOrigin = TransformOrigin(0.5f, 1f)
+                }
+                .clickable(onClick = onSettings),
+            shape = RoundedCornerShape(24.dp),
+            color = Color(0xFF2A2A2E),
+            shadowElevation = 12.dp,
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Settings,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.7f),
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = "Widget settings",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.9f),
                 )
             }
         }

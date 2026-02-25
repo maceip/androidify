@@ -15,6 +15,13 @@
  */
 package com.android.developers.androidify.launcher.ui
 
+import android.annotation.SuppressLint
+import android.app.StatusBarManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.activity.BackEventCompat
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.core.Animatable
@@ -28,6 +35,7 @@ import androidx.compose.foundation.gestures.DraggableAnchors
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.anchoredDraggable
 import androidx.compose.foundation.gestures.animateTo
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -60,14 +68,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -205,7 +216,21 @@ fun LauncherHomeScreen(
             )
         }
 
-        WallpaperBackground()
+        // Compute drawer open progress (0 = collapsed, 1 = fully expanded)
+        val drawerOffset = drawerState.offset
+        val drawerProgress = if (drawerOffset.isNaN() || screenHeightPx == 0f) {
+            0f
+        } else {
+            (1f - (drawerOffset / screenHeightPx)).coerceIn(0f, 1f)
+        }
+        // Blur radius scales with drawer open progress (max 30dp when fully open)
+        val blurRadius = (drawerProgress * 30f).dp
+
+        WallpaperBackground(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (blurRadius > 0.5.dp) Modifier.blur(blurRadius) else Modifier),
+        )
 
         // Arc animation overlay: when swiping up from a side face, the current
         // face scales down and follows a parabolic arc toward the search bar area
@@ -230,7 +255,9 @@ fun LauncherHomeScreen(
             arcOffsetY = arcOffsetY,
             arcScale = arcScale,
             arcAlpha = arcAlpha,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (blurRadius > 0.5.dp) Modifier.blur(blurRadius) else Modifier),
             onSwipeUpFromSideFace = {
                 if (currentFace != LauncherFace.Home && !isArcAnimating) {
                     scope.launch {
@@ -255,6 +282,7 @@ fun LauncherHomeScreen(
                         uiState = uiState,
                         drawerState = drawerState,
                         dockExpanded = dockExpanded,
+                        viewModel = viewModel,
                         onAppClick = { app ->
                             viewModel.launchApp(app)
                             scope.launch { drawerState.animateTo(DrawerValue.Collapsed) }
@@ -315,11 +343,16 @@ fun LauncherHomeScreen(
 }
 
 /**
- * 3D cube scene with enhanced depth effects. During rotation:
- * - Faces scale down slightly to enhance perspective
- * - Drop shadows appear on face edges
- * - Parallax shift adds depth to content
- * - Notification rails glow and track the rotation
+ * 3D prism scene: three faces arranged as \_/ viewed from above.
+ *
+ *   Face A (AI)  |rail|  Face B (Home)  |rail|  Face C (Social)
+ *
+ * During predictive-back:
+ *  - Left edge drag → counter-clockwise rotation → AI face rotates into view
+ *  - Right edge drag → clockwise rotation → Social face rotates into view
+ *
+ * Between faces, horizontal info rails show user-configurable data (weather,
+ * notifications, etc.). Rails are only visible while dragging.
  */
 @Composable
 private fun LauncherCubePredictiveBackScene(
@@ -338,38 +371,36 @@ private fun LauncherCubePredictiveBackScene(
     val easedProgress by animateFloatAsState(
         targetValue = progress,
         animationSpec = spring(
-            dampingRatio = 0.85f,
-            stiffness = Spring.StiffnessLow,
+            dampingRatio = 0.78f,
+            stiffness = Spring.StiffnessMediumLow,
         ),
         label = "cubeProgress",
     )
+    // Left edge swipe → directionSign = 1 → counter-clockwise → AI from left
     val directionSign = if (cubeDirection == CubeDirection.Left) 1f else -1f
-    val rotation = easedProgress * 92f * directionSign
+    val rotation = easedProgress * 90f * directionSign
 
-    // Scale down during rotation for enhanced 3D depth
-    val depthScale = 1f - easedProgress * 0.06f
-    // Subtle vertical parallax during rotation
-    val parallaxShift = easedProgress * 8f
+    // Depth scaling during rotation — subtle shrink for perspective
+    val depthScale = 1f - easedProgress * 0.04f
 
     Box(
         modifier = modifier.graphicsLayer {
-            cameraDistance = 28f * density
+            cameraDistance = 24f * density
             scaleX = depthScale
             scaleY = depthScale
         },
     ) {
-        // Home face
+        // ── Home face (B) ───────────────────────────────────────────────
         CubeFace(
             rotationY = -rotation,
-            transformOrigin = TransformOrigin(if (directionSign > 0f) 0f else 1f, 0.5f),
-            visibility = 1f - easedProgress * 0.12f,
-            scaleEffect = 1f - easedProgress * 0.03f,
-            shadowAlpha = easedProgress * 0.4f,
-            parallaxY = -parallaxShift,
+            transformOrigin = TransformOrigin(
+                if (directionSign > 0f) 0f else 1f, 0.5f,
+            ),
+            visibility = 1f - easedProgress * 0.08f,
             content = homeContent,
         )
 
-        // AI Hub face (left)
+        // ── AI Hub face (A) — left ─────────────────────────────────────
         val aiIsVisible = (directionSign > 0f && easedProgress > 0.01f) ||
             (currentFace == LauncherFace.Ai && arcProgress > 0f)
         if (aiIsVisible) {
@@ -395,9 +426,6 @@ private fun LauncherCubePredictiveBackScene(
                     rotationY = 90f - rotation,
                     transformOrigin = TransformOrigin(1f, 0.5f),
                     visibility = easedProgress,
-                    scaleEffect = 1f + easedProgress * 0.02f,
-                    shadowAlpha = (1f - easedProgress) * 0.3f,
-                    parallaxY = parallaxShift,
                     content = {
                         SwipeUpContainer(
                             enabled = currentFace == LauncherFace.Ai,
@@ -410,7 +438,7 @@ private fun LauncherCubePredictiveBackScene(
             }
         }
 
-        // Social Hub face (right)
+        // ── Social Hub face (C) — right ────────────────────────────────
         val socialIsVisible = (directionSign < 0f && easedProgress > 0.01f) ||
             (currentFace == LauncherFace.Social && arcProgress > 0f)
         if (socialIsVisible) {
@@ -436,9 +464,6 @@ private fun LauncherCubePredictiveBackScene(
                     rotationY = -90f - rotation,
                     transformOrigin = TransformOrigin(0f, 0.5f),
                     visibility = easedProgress,
-                    scaleEffect = 1f + easedProgress * 0.02f,
-                    shadowAlpha = (1f - easedProgress) * 0.3f,
-                    parallaxY = parallaxShift,
                     content = {
                         SwipeUpContainer(
                             enabled = currentFace == LauncherFace.Social,
@@ -451,19 +476,23 @@ private fun LauncherCubePredictiveBackScene(
             }
         }
 
-        // Enhanced notification rails with glow pulse during rotation
-        NotificationRail(
-            side = CubeDirection.Left,
-            alpha = (0.25f + easedProgress * 0.75f).coerceAtMost(1f),
-            offsetProgress = rotation / 90f,
-            glowIntensity = easedProgress,
-        )
-        NotificationRail(
-            side = CubeDirection.Right,
-            alpha = (0.25f + easedProgress * 0.75f).coerceAtMost(1f),
-            offsetProgress = rotation / 90f,
-            glowIntensity = easedProgress,
-        )
+        // ── Info rails between faces ───────────────────────────────────
+        // Only visible while actively dragging (easedProgress > 0).
+        // Left rail (between AI ↔ Home) and right rail (Home ↔ Social).
+        if (easedProgress > 0.02f) {
+            InfoRail(
+                side = CubeDirection.Left,
+                progress = easedProgress,
+                rotation = rotation,
+                label = "WEATHER: 49\u00B0",
+            )
+            InfoRail(
+                side = CubeDirection.Right,
+                progress = easedProgress,
+                rotation = rotation,
+                label = "NOTIFICATIONS: 3",
+            )
+        }
     }
 }
 
@@ -512,19 +541,14 @@ private fun SwipeUpContainer(
 }
 
 /**
- * Individual cube face with enhanced 3D effects:
- * - [scaleEffect] creates depth during rotation
- * - [shadowAlpha] adds edge shadows for realism
- * - [parallaxY] shifts content slightly for a parallax depth feel
+ * A single face of the 3D prism. Rendered via [graphicsLayer] rotationY
+ * with the specified [transformOrigin] as the hinge point.
  */
 @Composable
 private fun CubeFace(
     rotationY: Float,
     transformOrigin: TransformOrigin,
     visibility: Float,
-    scaleEffect: Float = 1f,
-    shadowAlpha: Float = 0f,
-    parallaxY: Float = 0f,
     content: @Composable () -> Unit,
 ) {
     Box(
@@ -534,102 +558,63 @@ private fun CubeFace(
                 this.rotationY = rotationY
                 this.transformOrigin = transformOrigin
                 alpha = visibility
-                this.scaleX = scaleEffect
-                this.scaleY = scaleEffect
-                translationY = parallaxY
             },
     ) {
         content()
-        // Edge shadow overlay for depth
-        if (shadowAlpha > 0.01f) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer { alpha = shadowAlpha }
-                    .background(
-                        Brush.horizontalGradient(
-                            colors = listOf(
-                                Color.Black.copy(alpha = 0.35f),
-                                Color.Transparent,
-                                Color.Transparent,
-                                Color.Black.copy(alpha = 0.35f),
-                            ),
-                            startX = 0f,
-                            endX = Float.POSITIVE_INFINITY,
-                        ),
-                    ),
-            )
-        }
     }
 }
 
 /**
- * Glowing notification rail at the cube edge. Tracks the rotation and pulses
- * with [glowIntensity] during the predictive back gesture.
+ * Horizontal info rail visible at the edge between two prism faces.
+ *
+ * The user described these as the "hinge" between faces:
+ *   A_|x|_B_|x|_C   where x shows configurable text like "WEATHER: 49"
+ *
+ * The rail is a narrow vertical strip at the seam of the cube edge, containing
+ * a horizontal text label. It fades in during drag and fades out on release.
+ * Only visible when [progress] > 0 (i.e. user is actively dragging).
  */
 @Composable
-private fun NotificationRail(
+private fun InfoRail(
     side: CubeDirection,
-    alpha: Float,
-    offsetProgress: Float,
-    glowIntensity: Float = 0f,
+    progress: Float,
+    rotation: Float,
+    label: String,
 ) {
-    val baseFraction = if (side == CubeDirection.Left) 0.06f else 0.94f
-    // Glow width expands during active rotation
-    val railWidth = 0.012f + glowIntensity * 0.006f
+    // Position the rail at the edge between the two faces
+    val baseFraction = if (side == CubeDirection.Left) 0.02f else 0.98f
+    val railAlpha = (progress * 2.5f).coerceIn(0f, 0.9f)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .graphicsLayer {
-                translationX = size.width * (baseFraction - 0.5f - (offsetProgress * 0.5f))
+                // Track rotation so the rail stays at the seam
+                translationX = size.width * (baseFraction - 0.5f - (rotation / 90f * 0.5f))
+                alpha = railAlpha
             },
         contentAlignment = Alignment.Center,
     ) {
-        // Outer glow (wider, more transparent)
-        if (glowIntensity > 0.05f) {
-            Box(
-                modifier = Modifier
-                    .padding(vertical = 24.dp)
-                    .height(440.dp)
-                    .fillMaxWidth(railWidth * 3f)
-                    .graphicsLayer { this.alpha = alpha * glowIntensity * 0.4f }
-                    .background(
-                        brush = Brush.verticalGradient(
-                            listOf(
-                                Color.Transparent,
-                                Color(0x60A6C8FF),
-                                Color(0x80B8D4FF),
-                                Color(0x60A6C8FF),
-                                Color.Transparent,
-                            ),
-                        ),
-                        shape = RoundedCornerShape(999.dp),
-                    ),
-            )
-        }
-        // Core rail
-        Box(
+        // Thin vertical strip with text
+        Column(
             modifier = Modifier
-                .padding(vertical = 32.dp)
-                .height(420.dp)
-                .fillMaxWidth(railWidth)
-                .graphicsLayer {
-                    this.alpha = alpha
-                    shadowElevation = 18f + glowIntensity * 12f
-                }
-                .background(
-                    brush = Brush.verticalGradient(
-                        listOf(
-                            Color(0x80FFFFFF),
-                            Color(0x60A6C8FF),
-                            Color(0x90B8D4FF),
-                            Color(0x60A6C8FF),
-                            Color(0x80FFFFFF),
-                        ),
-                    ),
-                    shape = RoundedCornerShape(999.dp),
-                ),
-        )
+                .height(160.dp)
+                .padding(horizontal = 2.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(Color.Black.copy(alpha = 0.6f))
+                .padding(horizontal = 6.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            // Render each character vertically for a spine-like effect
+            label.forEach { ch ->
+                Text(
+                    text = ch.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.85f),
+                )
+            }
+        }
     }
 }
 
@@ -645,12 +630,7 @@ private fun AiHubMockScreen(selected: Boolean) {
 
 @Composable
 private fun SocialHubMockScreen(selected: Boolean) {
-    MockSideHubScreen(
-        title = "Social Hub",
-        subtitle = "Email, X, TikTok, Instagram, LinkedIn feed aggregator",
-        chips = listOf("Unread", "Mentions", "Priority"),
-        selected = selected,
-    )
+    SocialHubScreen(selected = selected)
 }
 
 @Composable
@@ -771,12 +751,15 @@ private fun PhoneLauncherLayout(
     uiState: com.android.developers.androidify.launcher.LauncherUiState,
     drawerState: AnchoredDraggableState<DrawerValue>,
     dockExpanded: Boolean,
+    viewModel: LauncherViewModel,
     onAppClick: (AppInfo) -> Unit,
     onSearch: (String) -> Unit,
     onVoiceSearch: () -> Unit,
     onLensSearch: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     // Fade-in for app icons after wallpaper loads
     val contentAlpha by animateFloatAsState(
         targetValue = 1f,
@@ -784,68 +767,128 @@ private fun PhoneLauncherLayout(
         label = "contentAlpha",
     )
 
-    // [A] Velocity Buffer: consume MomentumBridge and drive spring animation
-    val velocity = MomentumBridge.initialVelocity.floatValue
+    // Subtle entry animation — content fades up gently on resume.
+    // The old "velocity buffer" (800px snap + -3000px/s) was too aggressive and
+    // created a visible disconnect. This uses a short, smooth spring instead.
     val timestamp = MomentumBridge.triggerTime.longValue
     val translationY = remember { Animatable(0f) }
 
     LaunchedEffect(timestamp) {
         if (timestamp > 0) {
-            translationY.snapTo(800f)
+            translationY.snapTo(120f)
             translationY.animateTo(
                 targetValue = 0f,
-                initialVelocity = velocity,
                 animationSpec = spring(
-                    dampingRatio = 0.6f,
-                    stiffness = 150f,
+                    dampingRatio = 0.85f,
+                    stiffness = 400f,
                 ),
             )
         }
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            // anchoredDraggable replaces the old detectVerticalDragGestures threshold.
-            // Upward drag opens the drawer; release snaps with spring physics.
-            .anchoredDraggable(drawerState, Orientation.Vertical)
-            .alpha(contentAlpha),
-    ) {
-        // [D] At-a-Glance: velocity-matched contextual widget above the grid
-        ContextualAtAGlance(yOffset = translationY.value)
+    val haptic = LocalHapticFeedback.current
+    var showContextMenu by remember { mutableStateOf(false) }
+    var contextMenuOffset by remember { mutableStateOf(Offset.Zero) }
 
-        // [A] Velocity-driven grid with scale compression
-        AppGrid(
-            apps = uiState.allApps,
-            columns = 4,
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .graphicsLayer {
-                    this.translationY = translationY.value
-                    val scale = 1f - (translationY.value / 5000f)
-                    this.scaleX = scale.coerceIn(0.9f, 1f)
-                    this.scaleY = scale.coerceIn(0.9f, 1f)
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                // Swipe down on the home screen expands the notification shade
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures { _, dragAmount ->
+                        if (dragAmount > 40f) {
+                            expandNotificationShade(context)
+                        }
+                    }
+                }
+                // anchoredDraggable replaces the old detectVerticalDragGestures threshold.
+                // Upward drag opens the drawer; release snaps with spring physics.
+                .anchoredDraggable(drawerState, Orientation.Vertical)
+                // Long-press to show context menu at the press location
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onLongPress = { offset ->
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            contextMenuOffset = offset
+                            showContextMenu = true
+                        },
+                    )
+                }
+                .alpha(contentAlpha),
+        ) {
+            // [D] At-a-Glance: velocity-matched contextual widget above the grid
+            ContextualAtAGlance(yOffset = translationY.value)
+
+            // Paged grid with gentle scale compression
+            PagedHomeGrid(
+                apps = uiState.allApps,
+                columns = 4,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .graphicsLayer {
+                        this.translationY = translationY.value
+                        val scale = 1f - (translationY.value / 5000f)
+                        this.scaleX = scale.coerceIn(0.95f, 1f)
+                        this.scaleY = scale.coerceIn(0.95f, 1f)
+                    },
+                onAppClick = onAppClick,
+                onLoadShortcuts = viewModel::loadShortcutsForPackage,
+                onLaunchShortcut = viewModel::launchShortcut,
+                onAppInfo = { app ->
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.parse("package:${app.packageName}")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    runCatching { context.startActivity(intent) }
                 },
-            onAppClick = onAppClick,
-        )
+            )
 
-        PixelBottomBar(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 12.dp),
-            dockApps = uiState.dockApps,
-            suggestedApp = uiState.suggestedApp,
-            onAppClick = onAppClick,
-            onSearch = onSearch,
-            onVoiceSearch = onVoiceSearch,
-            onLensSearch = onLensSearch,
-            onWidgetAction = {},
-            expanded = dockExpanded,
-        )
+            PixelBottomBar(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 12.dp),
+                dockApps = uiState.dockApps,
+                suggestedApp = uiState.suggestedApp,
+                onAppClick = onAppClick,
+                onSearch = onSearch,
+                onVoiceSearch = onVoiceSearch,
+                onLensSearch = onLensSearch,
+                onWidgetAction = {},
+                expanded = dockExpanded,
+                onSearchBarLongPress = {
+                    val intent = Intent(context, Class.forName("com.android.developers.androidify.SearchBarCustomizeActivity"))
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(intent)
+                },
+            )
+        }
+
+        // Long-press context menu overlay
+        if (showContextMenu) {
+            HomeScreenContextMenu(
+                pressOffset = contextMenuOffset,
+                onDismiss = { showContextMenu = false },
+                onWallpaper = { viewModel.launchWallpaperPicker() },
+                onWidgets = {
+                    // TODO: widget picker
+                },
+                onAppsList = {
+                    scope.launch { drawerState.animateTo(DrawerValue.Expanded) }
+                },
+                onSettings = {
+                    val intent = Intent("android.intent.action.APPLICATION_PREFERENCES").apply {
+                        setPackage(context.packageName)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    runCatching { context.startActivity(intent) }
+                },
+            )
+        }
     }
 }
 
@@ -866,20 +909,17 @@ fun FoldableLauncherLayout(
     onRecentFileClick: (com.android.developers.androidify.launcher.data.RecentFile) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // [A] Velocity Buffer for foldable layout
-    val velocity = MomentumBridge.initialVelocity.floatValue
     val timestamp = MomentumBridge.triggerTime.longValue
     val translationY = remember { Animatable(0f) }
 
     LaunchedEffect(timestamp) {
         if (timestamp > 0) {
-            translationY.snapTo(800f)
+            translationY.snapTo(120f)
             translationY.animateTo(
                 targetValue = 0f,
-                initialVelocity = velocity,
                 animationSpec = spring(
-                    dampingRatio = 0.6f,
-                    stiffness = 150f,
+                    dampingRatio = 0.85f,
+                    stiffness = 400f,
                 ),
             )
         }
@@ -925,5 +965,23 @@ fun FoldableLauncherLayout(
             onLensSearch = onLensSearch,
             onRecentFileClick = onRecentFileClick,
         )
+    }
+}
+
+/**
+ * Expand the system notification shade. Uses EXPAND_STATUS_BAR permission on API < 31,
+ * and StatusBarManager.expandNotificationsPanel() on API 31+.
+ */
+@SuppressLint("WrongConstant")
+private fun expandNotificationShade(context: Context) {
+    try {
+        // Use reflection on the internal StatusBarService — works on all API levels
+        // with EXPAND_STATUS_BAR permission. StatusBarManager.expandNotificationsPanel()
+        // is only available API 34+ and may require additional permissions.
+        @Suppress("DEPRECATION")
+        val service = context.getSystemService("statusbar")
+        service?.javaClass?.getMethod("expandNotificationsPanel")?.invoke(service)
+    } catch (_: Exception) {
+        // Permission denied or method not available — silently fail
     }
 }

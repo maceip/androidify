@@ -15,49 +15,41 @@
  */
 package com.android.developers.androidify.launcher.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.graphics.asImageBitmap
 import com.android.developers.androidify.launcher.data.RecentTask
 
 /**
- * Horizontal row of mini preview cards for recently-used apps, matching the
- * stock Android recents experience. Each card shows the app icon and name.
- *
- * On foldable inner displays, these cards tile the left panel of the app switcher.
+ * Pixel-style horizontal row of recently-used app icons.
+ * Simple circular icons with labels — matches the Pixel Launcher drawer.
  */
 @Composable
 fun RecentAppsCards(
     tasks: List<RecentTask>,
     modifier: Modifier = Modifier,
     onTaskClick: (RecentTask) -> Unit = {},
-    emptyContent: @Composable () -> Unit = { RecentAppsEmptyState() },
+    emptyContent: @Composable () -> Unit = {},
 ) {
     if (tasks.isEmpty()) {
         Box(modifier = modifier, contentAlignment = Alignment.Center) {
@@ -68,11 +60,11 @@ fun RecentAppsCards(
 
     LazyRow(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         contentPadding = PaddingValues(horizontal = 16.dp),
     ) {
         items(tasks, key = { it.id }) { task ->
-            RecentTaskCard(
+            RecentAppItem(
                 task = task,
                 onClick = { onTaskClick(task) },
             )
@@ -81,77 +73,25 @@ fun RecentAppsCards(
 }
 
 @Composable
-fun RecentTaskCard(
+private fun RecentAppItem(
     task: RecentTask,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit = {},
+    onClick: () -> Unit,
 ) {
     Column(
-        modifier = modifier
-            .width(120.dp)
-            .clickable(onClick = onClick),
+        modifier = Modifier
+            .width(72.dp)
+            .clickable(onClick = onClick)
+            .padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(9f / 16f),
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            shadowElevation = 4.dp,
-            tonalElevation = 2.dp,
-        ) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (task.thumbnail != null) {
-                    androidx.compose.foundation.Image(
-                        bitmap = task.thumbnail.let {
-                            android.graphics.Bitmap.createScaledBitmap(it, it.width, it.height, true)
-                                .let { bmp -> bmp.asImageBitmap() }
-                        },
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                    )
-                } else {
-                    // Gradient placeholder when no thumbnail is available
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    listOf(
-                                        MaterialTheme.colorScheme.primaryContainer,
-                                        MaterialTheme.colorScheme.secondaryContainer,
-                                    ),
-                                ),
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        AppIconImage(
-                            drawable = task.icon,
-                            contentDescription = task.label,
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape),
-                        )
-                    }
-                }
-            }
-        }
-
-        // App icon overlaid at bottom of card (stock Android style)
         AppIconImage(
             drawable = task.icon,
-            contentDescription = null,
+            contentDescription = task.label,
             modifier = Modifier
-                .size(24.dp)
-                .clip(CircleShape),
+                .size(48.dp)
+                .clip(RoundedCornerShape(14.dp)),
         )
-
+        Spacer(Modifier.height(4.dp))
         Text(
             text = task.label,
             style = MaterialTheme.typography.labelSmall,
@@ -159,22 +99,40 @@ fun RecentTaskCard(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
         )
     }
 }
 
+/**
+ * Tall card variant used in foldable layout's left panel.
+ */
 @Composable
-private fun RecentAppsEmptyState() {
+fun RecentTaskCard(
+    task: RecentTask,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit = {},
+) {
     Column(
+        modifier = modifier
+            .clickable(onClick = onClick)
+            .padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        AppIconImage(
+            drawable = task.icon,
+            contentDescription = task.label,
+            modifier = Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(14.dp)),
+        )
         Text(
-            text = "No recent apps",
-            style = MaterialTheme.typography.bodyMedium,
-            color = Color.White.copy(alpha = 0.6f),
+            text = task.label,
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
         )
     }
 }

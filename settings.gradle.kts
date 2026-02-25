@@ -16,13 +16,6 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven {
-            url = uri("https://jitpack.io")
-            content {
-                // This is required to use com.google.android.wearable.watchface.validator
-                includeGroup("com.github.xgouchet")
-            }
-        }
     }
 }
 
@@ -53,19 +46,6 @@ rootProject.name = "Androidify"
 includeBuild("build-plugin")
 
 include(":app")
-include(":feature:camera")
-include(":feature:creation")
-include(":feature:home")
 include(":feature:launcher")
-include(":feature:results")
-include(":data")
-include(":core:network")
 include(":core:util")
 include(":core:theme")
-include(":core:testing")
-include(":core:xr")
-include(":benchmark")
-include(":watchface")
-include(":wear")
-include(":wear:watchface")
-include(":wear:common")

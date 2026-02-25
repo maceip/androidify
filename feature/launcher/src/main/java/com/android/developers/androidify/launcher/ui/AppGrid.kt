@@ -9,17 +9,12 @@
  */
 package com.android.developers.androidify.launcher.ui
 
-import android.content.ClipData
-import android.content.ClipDescription
+import android.graphics.Bitmap
 import android.graphics.drawable.Drawable
-import android.os.Build
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,25 +31,26 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.State
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import com.android.developers.androidify.launcher.data.AppInfo
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+/** Standard icon size in pixels for pre-rasterization. */
+private const val ICON_SIZE_PX = 192
 
 @Composable
 fun AppGrid(
@@ -85,40 +81,18 @@ fun AppIconItem(
     onLongPress: () -> Unit = {},
 ) {
     val haptic = LocalHapticFeedback.current
-    val view = LocalView.current
-    var isPressed by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.88f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessHigh),
-        label = "iconPressScale",
-    )
 
     Column(
-        modifier = modifier.fillMaxWidth().aspectRatio(0.8f).scale(scale).pointerInput(Unit) {
-            detectTapGestures(
-                onPress = {
-                    isPressed = true
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    tryAwaitRelease()
-                    isPressed = false
-                },
-                onLongPress = {
-                    val clipData = ClipData(
-                        app.packageName,
-                        arrayOf(ClipDescription.MIMETYPE_TEXT_PLAIN),
-                        ClipData.Item(app.packageName),
-                    )
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                        view.startDragAndDrop(clipData, android.view.View.DragShadowBuilder(view), app, 0)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        view.startDrag(clipData, android.view.View.DragShadowBuilder(view), app, 0)
-                    }
+        modifier = modifier
+            .fillMaxWidth()
+            .aspectRatio(0.8f)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     onLongPress()
                 },
-                onTap = { onClick() },
-            )
-        },
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -152,12 +126,39 @@ fun AppIconItem(
     }
 }
 
+/**
+ * Renders a [Drawable] as an [Image], rasterizing the drawable to a bitmap
+ * off the main thread to avoid jank during scroll.
+ */
 @Composable
 fun AppIconImage(drawable: Drawable?, contentDescription: String?, modifier: Modifier = Modifier) {
-    if (drawable != null) {
-        val bitmap = remember(drawable) { drawable.toBitmap() }
-        Image(bitmap = bitmap.asImageBitmap(), contentDescription = contentDescription, modifier = modifier)
+    if (drawable == null) {
+        Box(modifier = modifier)
+        return
+    }
+
+    val bitmapState: State<ImageBitmap?> = produceState<ImageBitmap?>(
+        initialValue = null,
+        key1 = drawable,
+    ) {
+        value = withContext(Dispatchers.Default) {
+            val w = drawable.intrinsicWidth.coerceAtLeast(1)
+            val h = drawable.intrinsicHeight.coerceAtLeast(1)
+            // Rasterize at a fixed size — avoids huge bitmaps from xxxhdpi icons
+            val targetSize = ICON_SIZE_PX.coerceAtMost(maxOf(w, h))
+            drawable.toBitmap(targetSize, targetSize, Bitmap.Config.ARGB_8888).asImageBitmap()
+        }
+    }
+
+    val bitmap = bitmapState.value
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap,
+            contentDescription = contentDescription,
+            modifier = modifier,
+        )
     } else {
+        // Placeholder while loading — prevents layout shift
         Box(modifier = modifier)
     }
 }

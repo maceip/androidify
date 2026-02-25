@@ -1,0 +1,2 @@
+-keep,allowobfuscation,allowshrinking class com.android.developers.androidify.launcher.LauncherViewModel
+-keep,allowobfuscation,allowshrinking class com.android.developers.androidify.launcher.LauncherViewModel

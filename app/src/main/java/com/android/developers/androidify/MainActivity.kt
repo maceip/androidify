@@ -18,6 +18,7 @@ package com.android.developers.androidify
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import android.window.TrustedPresentationThresholds
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -85,6 +86,14 @@ class MainActivity : ComponentActivity() {
         MomentumBridge.inject(-3000f)
         UsageGatekeeper.getTopPackage(this)
         mediaServiceConnection?.connectToActiveSession()
+        // Hide the soft keyboard when returning to the home screen from another app.
+        // Prevents the keyboard from lingering when the search field had focus before leaving.
+        currentFocus?.let { view ->
+            val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
+            imm?.hideSoftInputFromWindow(view.windowToken, 0)
+        }
+        // Also clear focus from the window entirely
+        window.decorView.clearFocus()
     }
 
     /**
@@ -119,9 +128,18 @@ class MainActivity : ComponentActivity() {
                 val proxy = java.lang.reflect.Proxy.newProxyInstance(
                     callbackClass.classLoader,
                     arrayOf(callbackClass),
-                ) { _, _, _ ->
-                    MomentumBridge.inject(-3500f)
-                    null
+                ) { proxyObj, method, _ ->
+                    // Must handle Object methods properly — the system puts this
+                    // callback into a HashMap which calls hashCode()/equals().
+                    when (method.name) {
+                        "hashCode" -> System.identityHashCode(proxyObj)
+                        "equals" -> proxyObj === proxyObj
+                        "toString" -> "NavigationObserverProxy"
+                        else -> {
+                            MomentumBridge.inject(-3500f)
+                            null
+                        }
+                    }
                 }
                 // PRIORITY_SYSTEM_NAVIGATION_OBSERVER = 0 (API 36+)
                 val dispatcher = onBackInvokedDispatcher

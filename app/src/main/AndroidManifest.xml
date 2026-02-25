@@ -26,26 +26,10 @@
     <uses-permission android:name="android.permission.BIND_APPWIDGET" />
     <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <!-- [B] Notes Role: PACKAGE_USAGE_STATS for ID Access Gate (Settings > Usage Access) -->
+    <!-- UsageStats for "At a Glance" contextual info — requires user grant in Settings -->
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-    <uses-permission
-        android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
-
-    <uses-feature
-        android:name="android.hardware.camera"
-        android:required="true" />
-
-    <!-- Androidify can use XR features if they're available; they're not required. -->
-    <uses-feature
-        android:name="android.software.xr.api.spatial"
-        android:required="false" />
-
-    <uses-permission android:name="android.permission.CAMERA" />
 
     <application
         android:name=".AndroidifyApplication"
@@ -63,34 +47,6 @@
         <profileable
             android:shell="true"
             tools:targetApi="29" />
-
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.fileprovider"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths" />
-        </provider>
-        <provider
-            android:name="androidx.startup.InitializationProvider"
-            android:authorities="${applicationId}.androidx-startup"
-            android:exported="false"
-            tools:node="merge">
-            <meta-data
-                android:name="com.android.developers.androidify.startup.FirebaseAppInitializer"
-                android:value="@string/androidx_startup" />
-            <meta-data
-                android:name="com.android.developers.androidify.startup.FirebaseAppCheckInitializer"
-                android:value="@string/androidx_startup" />
-            <meta-data
-                android:name="com.android.developers.androidify.startup.FirebaseRemoteConfigInitializer"
-                android:value="@string/androidx_startup" />
-            <meta-data
-                android:name="com.android.developers.androidify.startup.GeminiNanoDownloaderInitializer"
-                android:value="@string/androidx_startup" />
-        </provider>
 
         <activity
             android:name=".MainActivity"
@@ -121,33 +77,23 @@
                 <action android:name="android.intent.action.SET_WALLPAPER" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
-            <!-- [B] Notes Role: CREATE_NOTE intent for lock-screen note capture -->
-            <intent-filter>
-                <action android:name="android.intent.action.CREATE_NOTE" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-            <!-- Required deeplink to make the app launchable from the watch -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
+        </activity>
 
+        <!-- Settings gear in the system default-app picker -->
+        <activity
+            android:name=".LauncherSettingsActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Androidify">
+            <intent-filter>
+                <action android:name="android.intent.action.APPLICATION_PREFERENCES" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data
-                    android:host="launch"
-                    android:scheme="androidify" />
             </intent-filter>
         </activity>
-        <!-- need to use Theme.AppCompat -->
-        <activity
-            android:name="com.google.android.gms.oss.licenses.OssLicensesMenuActivity"
-            android:theme="@style/AppCompatAndroidify" />
 
-        <!-- needs to use Theme.AppCompat -->
         <activity
-            android:name="com.google.android.gms.oss.licenses.OssLicensesActivity"
-            android:theme="@style/AppCompatAndroidify" />
-
+            android:name=".SearchBarCustomizeActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Androidify" />
 
         <service
             android:name=".LauncherNotificationListenerService"
@@ -159,7 +105,7 @@
             </intent-filter>
         </service>
 
-        <!-- [B] Notes Role service stub — keeps process warm via oom_score_adj -->
+        <!-- Notes Role service — keeps process warm via oom_score_adj -->
         <service
             android:name=".AssistantNotesService"
             android:exported="false">
@@ -167,10 +113,6 @@
                 <action android:name="android.intent.action.CREATE_NOTE" />
             </intent-filter>
         </service>
-
-        <meta-data
-            android:name="com.google.mlkit.vision.DEPENDENCIES"
-            android:value="subject_segmentation" />
     </application>
 
 </manifest>

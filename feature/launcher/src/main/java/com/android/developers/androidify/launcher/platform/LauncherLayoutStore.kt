@@ -29,4 +29,12 @@ class LauncherLayoutStore @Inject constructor(
             prefs[pinnedWidgetsKey] = current
         }
     }
+
+    suspend fun removePinnedWidgetId(id: Int) {
+        context.launcherDataStore.edit { prefs ->
+            val current = prefs[pinnedWidgetsKey].orEmpty().toMutableSet()
+            current.remove(id.toString())
+            prefs[pinnedWidgetsKey] = current
+        }
+    }
 }

@@ -16,28 +16,24 @@
 package com.android.developers.androidify
 
 import android.util.Log
-import com.google.firebase.crashlytics.FirebaseCrashlytics
 import timber.log.Timber
 
 /**
- * A Timber tree that logs to Crashlytics.
+ * A Timber tree for release builds that filters verbose/debug logs.
  *
- * In debug builds, this tree does nothing. In release builds, it logs non-fatal exceptions
- * to Crashlytics.
+ * @@@ TODO: Replace with a real crash reporting service (Firebase Crashlytics,
+ * Sentry, Bugsnag, etc.) before shipping to production.
  */
 class CrashlyticsTree : Timber.Tree() {
-
-    private val crashlytics by lazy { FirebaseCrashlytics.getInstance() }
 
     override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
         if (priority == Log.VERBOSE || priority == Log.DEBUG) {
             return
         }
-
-        crashlytics.log(message)
-
+        // Log to system log for now; replace with crash reporting SDK later
+        Log.println(priority, tag ?: "Launcher", message)
         if (t != null) {
-            crashlytics.recordException(t)
+            Log.e(tag ?: "Launcher", "Exception:", t)
         }
     }
 }

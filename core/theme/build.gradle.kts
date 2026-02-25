@@ -53,13 +53,5 @@ dependencies {
     api(libs.androidx.navigation3.ui)
     debugImplementation(libs.ui.tooling)
 
-    // Android Instrumented Tests
-    androidTestImplementation(platform(libs.androidx.compose.bom))
-    androidTestImplementation(libs.androidx.ui.test.junit4)
-    androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
-    androidTestImplementation(libs.hilt.android.testing)
-    androidTestImplementation(projects.core.testing)
-
     debugImplementation(libs.androidx.ui.test.manifest)
 }

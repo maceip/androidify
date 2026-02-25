@@ -15,8 +15,10 @@
  */
 package com.android.developers.androidify.launcher.ui
 
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.AnchoredDraggableState
+import androidx.compose.foundation.gestures.animateTo
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -58,6 +60,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
@@ -67,6 +70,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Velocity
@@ -106,6 +111,7 @@ fun AppDrawer(
     onSearchSubmit: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val drawerShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -113,14 +119,17 @@ fun AppDrawer(
             .graphicsLayer {
                 val raw = drawerState.offset
                 translationY = if (raw.isNaN()) screenHeightPx else raw
+                shape = drawerShape
+                clip = true
             }
             .background(
-                Brush.verticalGradient(
+                brush = Brush.verticalGradient(
                     colors = listOf(
+                        Color.Black.copy(alpha = 0.55f),
                         Color.Black.copy(alpha = 0.75f),
-                        Color.Black.copy(alpha = 0.92f),
                     ),
                 ),
+                shape = drawerShape,
             ),
     ) {
         when (layoutType) {
@@ -157,11 +166,15 @@ private fun PhoneAppDrawer(
     onDismiss: () -> Unit,
 ) {
     val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
 
-    // Request keyboard focus only once the drawer has fully settled open
+    // Clear focus and hide keyboard when the drawer collapses.
+    // Do NOT auto-focus on expand — keyboard should only appear when user taps search.
     LaunchedEffect(drawerState.currentValue) {
-        if (drawerState.currentValue == DrawerValue.Expanded) {
-            focusRequester.requestFocus()
+        if (drawerState.currentValue == DrawerValue.Collapsed) {
+            focusManager.clearFocus()
+            keyboardController?.hide()
         }
     }
 
@@ -182,8 +195,13 @@ private fun PhoneAppDrawer(
 
             override suspend fun onPreFling(available: Velocity): Velocity {
                 return if (available.y > 0f && drawerState.currentValue != DrawerValue.Collapsed) {
-                    @Suppress("DEPRECATION")
-                    drawerState.settle(available.y)
+                    drawerState.animateTo(
+                        DrawerValue.Collapsed,
+                        spring(
+                            dampingRatio = 0.8f,
+                            stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow,
+                        ),
+                    )
                     available
                 } else {
                     Velocity.Zero
@@ -209,7 +227,20 @@ private fun PhoneAppDrawer(
                 .align(Alignment.CenterHorizontally),
         )
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
+
+        // Search field at the top (Pixel layout: search → recent → apps)
+        DrawerSearchField(
+            query = uiState.searchQuery,
+            onQueryChange = onSearchQueryChange,
+            onSearchSubmit = onSearchSubmit,
+            focusRequester = focusRequester,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+        )
+
+        Spacer(Modifier.height(12.dp))
 
         if (uiState.recentTasks.isNotEmpty()) {
             Text(
@@ -223,23 +254,11 @@ private fun PhoneAppDrawer(
                 tasks = uiState.recentTasks,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(180.dp),
+                    .height(120.dp),
                 onTaskClick = onTaskClick,
             )
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
         }
-
-        DrawerSearchField(
-            query = uiState.searchQuery,
-            onQueryChange = onSearchQueryChange,
-            onSearchSubmit = onSearchSubmit,
-            focusRequester = focusRequester,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-        )
-
-        Spacer(Modifier.height(12.dp))
 
         // nestedScroll coordinates "scroll list" vs "close drawer" seamlessly
         LazyVerticalGrid(
@@ -274,10 +293,13 @@ fun FoldableAppDrawer(
     modifier: Modifier = Modifier,
 ) {
     val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     LaunchedEffect(drawerState.currentValue) {
-        if (drawerState.currentValue == DrawerValue.Expanded) {
-            focusRequester.requestFocus()
+        if (drawerState.currentValue == DrawerValue.Collapsed) {
+            focusManager.clearFocus()
+            keyboardController?.hide()
         }
     }
 
@@ -297,8 +319,13 @@ fun FoldableAppDrawer(
 
             override suspend fun onPreFling(available: Velocity): Velocity {
                 return if (available.y > 0f && drawerState.currentValue != DrawerValue.Collapsed) {
-                    @Suppress("DEPRECATION")
-                    drawerState.settle(available.y)
+                    drawerState.animateTo(
+                        DrawerValue.Collapsed,
+                        spring(
+                            dampingRatio = 0.8f,
+                            stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow,
+                        ),
+                    )
                     available
                 } else {
                     Velocity.Zero
